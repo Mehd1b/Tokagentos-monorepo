@@ -112,16 +112,39 @@ function buildConfigJs(runtime: IAgentRuntime): string {
       rpcUrl: publicRpcs[c.chainId] ?? "",
       currency: "ETH",
       explorer: explorers[c.chainId] ?? "",
+      ton: c.ton ?? null,
+      bridge: c.bridge
+        ? {
+            fromChainId: c.bridge.fromChainId,
+            fromName: chainNames[c.bridge.fromChainId] ?? `chain-${c.bridge.fromChainId}`,
+            fromRpc: publicRpcs[c.bridge.fromChainId] ?? "",
+            l1Token: c.bridge.l1Token,
+            l1StandardBridge: c.bridge.l1StandardBridge,
+            minGasLimit: c.bridge.minGasLimit,
+          }
+        : null,
     }));
   // Always include the configured chain even if it isn't a live registry entry
   // (e.g. a local Anvil fork) so single-chain / local dev keeps working.
   if (!selectableChains.some((c) => c.id === chainId)) {
+    const c = BILLING_CHAIN_MAP.get(chainId);
     selectableChains.unshift({
       id: chainId,
       name: chainNames[chainId] ?? `chain-${chainId}`,
       rpcUrl: get("BILLING_CHAIN_RPC_URL") || publicRpcs[chainId] || "",
       currency: "ETH",
       explorer: explorers[chainId] ?? "",
+      ton: c?.ton ?? null,
+      bridge: c?.bridge
+        ? {
+            fromChainId: c.bridge.fromChainId,
+            fromName: chainNames[c.bridge.fromChainId] ?? `chain-${c.bridge.fromChainId}`,
+            fromRpc: publicRpcs[c.bridge.fromChainId] ?? "",
+            l1Token: c.bridge.l1Token,
+            l1StandardBridge: c.bridge.l1StandardBridge,
+            minGasLimit: c.bridge.minGasLimit,
+          }
+        : null,
     });
   }
 

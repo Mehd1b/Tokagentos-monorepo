@@ -61,12 +61,33 @@ const CHAINS = (Array.isArray(CONFIG.CHAINS) && CONFIG.CHAINS.length > 0
     rpcUrl: String(c.rpcUrl ?? ""),
     currency: String(c.currency ?? "ETH"),
     explorer: String(c.explorer ?? ""),
+    // Underlying TON address for this chain (Base = bridged L2 TON). Plus the
+    // OP-Stack bridge descriptor present only on chains receiving bridged TON.
+    ton: c.ton ?? null,
+    bridge: c.bridge ?? null,
   };
 });
 
 /** Resolve a chain's metadata by id, defaulting to the first selectable chain. */
 function chainMeta(id) {
   return CHAINS.find((c) => c.id === Number(id)) ?? CHAINS[0];
+}
+
+const SELECTED_CHAIN_KEY = "ai-proxy-dashboard:selectedChainId";
+
+/** Persisted-or-default selected network. Persisting across reloads avoids
+ *  silently resetting to the configured chain (e.g. back to Ethereum) after the
+ *  user picked Base — which otherwise hides the Base-only "Get PTON" helper and
+ *  points top-ups at the wrong chain. */
+function defaultSelectedChainId() {
+  try {
+    const s = sessionStorage.getItem(SELECTED_CHAIN_KEY);
+    const n = s ? Number(s) : NaN;
+    if (Number.isInteger(n) && CHAINS.some((c) => c.id === n)) return n;
+  } catch {
+    /* sessionStorage unavailable */
+  }
+  return CHAINS.some((c) => c.id === CHAIN_ID) ? CHAIN_ID : CHAINS[0].id;
 }
 
 const SESSION_KEY = "ai-proxy-dashboard:session";
@@ -119,6 +140,9 @@ const state = {
   walletEth: null,
   /** Connected wallet's PTON token balance (atto, BigInt). */
   walletPton: null,
+  /** On-chain ClaudeVault.credits(wallet) for the SELECTED chain — the
+   *  per-network spendable balance, read live from that chain's vault. */
+  onchainCredits: null,
   /** Per-token wallet balances for the Swap card. Keyed by symbol (USDC, USDT,
    * ETH, WBTC). Engineer will populate via on-chain reads when wiring swap.
    * Format: float (display units, NOT raw atto). */
@@ -138,7 +162,7 @@ const state = {
   activeTab: "overview",
   /** Chain the user picked for top-up (e.g. 1 = Ethereum, 8453 = Base).
    *  Defaults to the gateway's configured chain when it is selectable. */
-  selectedChainId: CHAINS.some((c) => c.id === CHAIN_ID) ? CHAIN_ID : CHAINS[0].id,
+  selectedChainId: defaultSelectedChainId(),
   /** Per-chain { vault, pton } cache keyed by chainId — addresses differ per
    *  chain, so a single shared `vault`/`pton` would cross-wire the deposit. */
   targetsByChain: {},
@@ -487,9 +511,21 @@ async function siweLogin() {
     method: "POST",
     body: JSON.stringify({ wallet: fromAddress }),
   });
-  // Sign the LoginAuth EIP-712 struct exactly as the server returned it.
+  // SIWE login authenticates the wallet, not a billing chain. The server returns
+  // a LoginAuth domain pinned to its configured chain, but a wallet refuses to
+  // sign typed data whose domain.chainId != its ACTIVE chain ("Provided chainId
+  // must match the active chainId"). So sign with the wallet's active chainId and
+  // pass that chainId to /v1/auth/login, which verifies against the supplied
+  // chainId (it's optional there, defaulting to the server's configured chain).
+  let activeChainId = state.selectedChainId;
+  try {
+    const hex = await rpc("eth_chainId");
+    if (typeof hex === "string") activeChainId = Number.parseInt(hex, 16) || activeChainId;
+  } catch {
+    // No eth_chainId — fall back to the selected network.
+  }
   const typedData = {
-    domain: nonceRes.domain,
+    domain: { ...nonceRes.domain, chainId: activeChainId },
     primaryType: nonceRes.primaryType,
     types: {
       EIP712Domain: [
@@ -515,6 +551,7 @@ async function siweLogin() {
       issuedAt: nonceRes.issuedAt,
       expiresAt: nonceRes.expiresAt,
       signature,
+      chainId: activeChainId,
     }),
   });
   saveSession(loginRes);
@@ -618,30 +655,6 @@ async function signTopupAuth({ pton, vault, valueAtto, nonce, validAfter, validB
   let v = parseInt(sig.slice(130, 132), 16);
   if (v < 27) v += 27;
   return { v, r, s, message: typedData.message, fromAddress };
-}
-
-// Test/fork-only helper: have the user's wallet call `PTON.faucet(amount)` so
-// they can self-mint PTON before topping up. Reverts if the deployed PTON was
-// built with `faucetEnabled=false` (production).
-async function mintFaucet(ptonFloat) {
-  if (!Number.isFinite(ptonFloat) || ptonFloat <= 0) throw new Error("amount must be > 0");
-  const valueAtto = BigInt(Math.round(ptonFloat * 1_000_000)) * (ATTO / 1_000_000n);
-  const { pton } = await resolveDepositTargets();
-  const fromAddress = await activeAccountOrThrow();
-  // faucet(uint256) selector = first 4 bytes of keccak256("faucet(uint256)").
-  const data = "0x57915897" + valueAtto.toString(16).padStart(64, "0");
-  const txHash = await rpc("eth_sendTransaction", [{ from: fromAddress, to: pton, data }]);
-  const start = Date.now();
-  while (Date.now() - start < 60_000) {
-    const rcpt = await rpc("eth_getTransactionReceipt", [txHash]);
-    if (rcpt) {
-      if (rcpt.status === "0x1") return txHash;
-      // Most common revert reason is faucetEnabled=false on a prod deploy.
-      throw new Error("faucet tx reverted (PTON likely deployed with faucetEnabled=false)");
-    }
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  throw new Error("faucet receipt timeout");
 }
 
 async function topUp(ptonFloat) {
@@ -802,6 +815,7 @@ const SEL_PTON_DEPOSIT      = "b6b55f25"; // deposit(uint256)
 const SEL_WTON_SWAP_TO_TON  = "f53fe70f"; // swapToTON(uint256)
 const SEL_ROUTER_EXACT_IN   = "b858183f"; // exactInput((bytes,address,uint256,uint256))
 const SEL_QUOTER_EXACT_IN   = "cdca1753"; // quoteExactInput(bytes,uint256)
+const SEL_BRIDGE_DEPOSIT_ERC20_TO = "838b2520"; // depositERC20To(address,address,address,uint256,uint32,bytes)
 
 // parseUnits — convert a JS Number/string to BigInt atto units of given decimals,
 // without floating-point drift for sane decimal strings.
@@ -1186,6 +1200,42 @@ async function loadCredits() {
   state.credits = await apiJson(`/v1/credits/me?chainId=${state.selectedChainId}`);
 }
 
+// Read the SELECTED chain's on-chain vault credits directly from that chain's
+// public RPC — the true per-network spendable, independent of the wallet's
+// active chain and of whether the gateway's ledger is chain-aware yet.
+async function publicEthCall(rpcUrl, to, data) {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }),
+  });
+  const j = await res.json();
+  if (j.error) throw new Error(j.error.message || "eth_call failed");
+  return j.result;
+}
+
+async function loadOnChainCredits() {
+  if (!state.wallet) {
+    state.onchainCredits = null;
+    return;
+  }
+  try {
+    const { vault } = await resolveDepositTargets();
+    const meta = chainMeta(state.selectedChainId);
+    if (!vault || !meta.rpcUrl) {
+      state.onchainCredits = null;
+      return;
+    }
+    const padded = state.wallet.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    // ClaudeVault.credits(address) → 0xfe5ff468
+    const hex = await publicEthCall(meta.rpcUrl, vault, "0xfe5ff468" + padded);
+    state.onchainCredits = BigInt(hex);
+  } catch (e) {
+    state.onchainCredits = null;
+    console.warn("[dashboard] vault.credits read failed", e);
+  }
+}
+
 // Read the connected wallet's native ETH balance and PTON token balance via
 // the wallet's own EIP-1193 provider. PTON address is resolved once via the
 // proxy's 402 probe (cached in `state.pton`).
@@ -1300,10 +1350,16 @@ function renderKpis() {
   const balance = c?.ledger?.balance ?? c?.balance ?? c?.onChainCredits;
   const reserved = c?.ledger?.reserved ?? c?.reserved ?? 0n;
   const accrued = c?.ledger?.accrued ?? c?.accrued ?? 0n;
-  $("#kpi-balance").textContent = fmtPton(balance);
+  // Spendable is shown PER NETWORK: prefer the live on-chain vault credits for
+  // the selected chain (refreshed on every network switch); fall back to the
+  // gateway ledger balance when the on-chain read is unavailable.
+  const spendable = state.onchainCredits != null ? state.onchainCredits : balance;
+  $("#kpi-balance").textContent = fmtPton(spendable);
   $("#kpi-reserved").textContent = fmtPton(reserved);
   $("#kpi-accrued").textContent = fmtPton(accrued);
-  $("#kpi-balance-usd").textContent = fmtUsdFromAttoPton(balance, state.tonUsd);
+  $("#kpi-balance-usd").textContent = fmtUsdFromAttoPton(spendable, state.tonUsd);
+  const heroNet = document.getElementById("hero-network");
+  if (heroNet) heroNet.textContent = chainMeta(state.selectedChainId).name;
   // Wallet holdings (outside the vault). ETH and PTON share 18 decimals so
   // fmtPton works for both — only the unit label differs.
   $("#kpi-wallet-pton").textContent = fmtPton(state.walletPton);
@@ -1321,8 +1377,10 @@ function renderKpis() {
 
   // Sync swap card balance hint whenever wallet balances refresh.
   renderSwapPreview();
-  // Refresh the per-network backing shown in the bridge panel.
+  // Refresh the on-chain L1/L2 TON balances shown in the bridge panel.
   renderBridge();
+  // Refresh wallet-PTON + the Get PTON helper visibility.
+  updateGetPton();
 }
 
 function renderUsageOverview() {
@@ -1618,6 +1676,7 @@ async function refreshAll() {
     loadCredits().catch(() => {}),
     loadUsage().catch(() => {}),
     loadWalletHoldings().catch(() => {}),
+    loadOnChainCredits().catch(() => {}),
   ];
   await Promise.all(work);
   renderKpis();
@@ -1712,56 +1771,132 @@ function updateSwapForChain() {
   const tag = card.querySelector(".card-tag");
   if (tag) tag.textContent = onEth ? "Route via TON" : "Ethereum only";
   renderBridge();
+  updateGetPton();
 }
 
-// Update the Base bridge panel: target network name + per-network backing.
+// Update the bridge panel: target network name + the two live on-chain TON
+// balances (Ethereum L1 TON and the selected chain's bridged L2 TON). Tolerant
+// of a disconnected wallet or a chain without a bridge descriptor (shows "—").
 function renderBridge() {
-  const meta = chainMeta(state.selectedChainId);
+  const ch = chainMeta(state.selectedChainId);
   const n1 = document.getElementById("bridge-target-name");
   const n2 = document.getElementById("bridge-target-name-2");
-  if (n1) n1.textContent = meta.name;
-  if (n2) n2.textContent = meta.name;
-  const b = document.getElementById("bridge-backing");
-  if (b) {
-    const backing = state.credits?.backing;
-    b.textContent = backing != null && backing !== "" ? fmtPton(BigInt(backing)) : "—";
+  if (n1) n1.textContent = ch.name;
+  if (n2) n2.textContent = ch.name;
+  const l1El = document.getElementById("bridge-l1-ton");
+  const l2El = document.getElementById("bridge-l2-ton");
+  if (l1El) l1El.textContent = "—";
+  if (l2El) l2El.textContent = "—";
+  const b = ch.bridge;
+  if (!b || !state.wallet) return;
+  const balData = "0x" + SEL_ERC20_BALANCE_OF + _encAddr(state.wallet);
+  // L1 TON balance read against Ethereum's RPC (no wallet switch needed).
+  if (l1El && b.fromRpc && b.l1Token) {
+    publicEthCall(b.fromRpc, b.l1Token, balData)
+      .then((hex) => { l1El.textContent = fmtPton(BigInt(hex)); })
+      .catch(() => { l1El.textContent = "—"; });
+  }
+  // L2 TON balance read against the selected chain's RPC.
+  if (l2El && ch.rpcUrl && ch.ton) {
+    publicEthCall(ch.rpcUrl, ch.ton, balData)
+      .then((hex) => { l2El.textContent = fmtPton(BigInt(hex)); })
+      .catch(() => { l2El.textContent = "—"; });
   }
 }
 
-// Credit-level bridge: move spendable backing from Ethereum (1) to the selected
-// network via POST /v1/credits/bridge. Ledger-only — no on-chain token move.
+// Real token bridge: lock TON on Ethereum via the OP-Stack L1StandardBridge
+// (depositERC20To) so the same amount of bridged L2 TON arrives on the selected
+// chain (Base). After arrival the user wraps TON → PTON ("Get PTON") then tops
+// up. No ledger-only credit move — this is an actual cross-chain token transfer.
 function wireBridge() {
   const btn = document.getElementById("bridge-btn");
   if (!btn) return;
   btn.addEventListener("click", async () => {
     const status = document.getElementById("bridge-status");
     const amtEl = document.getElementById("bridge-amount");
-    const v = parseFloat(amtEl ? amtEl.value : "");
-    if (!Number.isFinite(v) || v <= 0) {
+    const ch = chainMeta(state.selectedChainId);
+    const b = ch.bridge;
+    if (!b) {
+      setStatus(status, "Bridging not available on this network", "err");
+      return;
+    }
+    const raw = amtEl ? amtEl.value : "";
+    let amount;
+    try {
+      amount = parseUnits(raw, 18); // TON is 18 decimals
+    } catch {
       setStatus(status, "Amount must be > 0", "err");
       return;
     }
-    if (state.selectedChainId === 1) {
-      setStatus(status, "Select a non-Ethereum network to bridge into.", "err");
+    if (amount <= 0n) {
+      setStatus(status, "Amount must be > 0", "err");
       return;
     }
-    const amountAtto = BigInt(Math.round(v * 1_000_000)) * (ATTO / 1_000_000n);
     btn.disabled = true;
-    setStatus(status, "Bridging credits from Ethereum…");
     try {
-      await apiJson("/v1/credits/bridge", {
-        method: "POST",
-        body: JSON.stringify({
-          fromChainId: 1,
-          toChainId: state.selectedChainId,
-          amount: amountAtto.toString(),
-        }),
+      // 1. Move the wallet to Ethereum (the L1 where TON is locked).
+      setStatus(status, `Switching wallet to ${b.fromName ?? "Ethereum"}…`);
+      await ensureChain(chainMeta(b.fromChainId));
+      // 2. Approve L1 TON → L1StandardBridge for the deposit amount.
+      await _ensureAllowance({
+        token: b.l1Token,
+        owner: state.wallet,
+        spender: b.l1StandardBridge,
+        amount,
+        symbol: "TON",
       });
-      setStatus(status, `Bridged ${v} PTON of credits to ${chainMeta(state.selectedChainId).name}.`, "ok");
-      if (amtEl) amtEl.value = "";
-      await refreshAll();
+      // 3. depositERC20To(_l1Token, _l2Token, _to, _amount, _minGasLimit, _extraData)
+      //    The last bytes arg is empty: offset 0xc0 (192) points past the 6 head
+      //    words to a length-0 bytes payload.
+      setStatus(status, `Locking ${formatUnits(amount, 18, 6)} TON on ${b.fromName ?? "Ethereum"}…`);
+      const data = "0x" + SEL_BRIDGE_DEPOSIT_ERC20_TO
+        + _encAddr(b.l1Token)
+        + _encAddr(ch.ton)
+        + _encAddr(state.wallet)
+        + _encUint(amount)
+        + _encUint(BigInt(b.minGasLimit))
+        + _encUint(192n)
+        + _encUint(0n);
+      await _sendAndWait({ to: b.l1StandardBridge, data });
+      setStatus(status, `Locked on ${b.fromName ?? "Ethereum"} — funds arrive on ${ch.name} in ~1-3 min`);
+      // 4. Return the wallet to the selected chain and poll for arrival.
+      await ensureChain(ch);
+      const balData = "0x" + SEL_ERC20_BALANCE_OF + _encAddr(state.wallet);
+      const before = ch.rpcUrl && ch.ton
+        ? BigInt(await publicEthCall(ch.rpcUrl, ch.ton, balData).catch(() => "0x0"))
+        : 0n;
+      let arrived = false;
+      for (let i = 0; i < 24; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        let now;
+        try {
+          now = BigInt(await publicEthCall(ch.rpcUrl, ch.ton, balData));
+        } catch {
+          continue; // transient RPC blip — keep polling
+        }
+        if (now > before) {
+          arrived = true;
+          break;
+        }
+        setStatus(status, `Waiting for ${ch.name} arrival… (${i + 1}/24)`);
+      }
+      if (arrived) {
+        setStatus(
+          status,
+          `Bridged! ${formatUnits(amount, 18, 6)} TON now on ${ch.name}. Click 'Get PTON' to wrap, then top up.`,
+          "ok",
+        );
+        if (amtEl) amtEl.value = "";
+      } else {
+        setStatus(
+          status,
+          `Locked on ${b.fromName ?? "Ethereum"}. Funds are still in transit to ${ch.name} — they will appear shortly.`,
+        );
+      }
+      renderBridge();
+      updateGetPton();
     } catch (e) {
-      setStatus(status, `Bridge failed: ${e.message}`, "err");
+      setStatus(status, `Bridge failed: ${friendlyError(e.message)}`, "err");
     } finally {
       btn.disabled = false;
     }
@@ -1775,6 +1910,14 @@ function wireNetworkSwitcher() {
     const id = Number(sel.value);
     if (!id || id === state.selectedChainId) return;
     state.selectedChainId = id;
+    // Drop the previous chain's per-network spendable so it doesn't linger while
+    // the new chain's on-chain credits are re-fetched by refreshAll() below.
+    state.onchainCredits = null;
+    try {
+      sessionStorage.setItem(SELECTED_CHAIN_KEY, String(id));
+    } catch {
+      /* sessionStorage unavailable — selection just won't persist */
+    }
     renderNetworkSwitcher();
     updateSwapForChain();
     setStatus($("#topup-status"), "");
@@ -1947,28 +2090,114 @@ async function waitForServerBack({ timeoutMs = 60_000 } = {}) {
   return false;
 }
 
-function wireFaucet() {
-  const btn = $("#faucet-btn");
+// ----------------------------- Get PTON (wrap TON → PTON) -----------------------------
+//
+// A top-up DEPOSITS PTON you already hold. On networks with no canonical PTON
+// (e.g. Base, whose TON is bridged from Ethereum) the wallet starts with 0 PTON,
+// so depositX402 reverts with ERC20InsufficientBalance (0xe450d38c). This wraps
+// the bridged TON → PTON: approve → PTON.deposit. If the wallet is short on TON,
+// the user must bridge real TON from Ethereum first (no faucet).
+
+async function sendTxAndWait(to, data, label) {
+  const fromAddress = await activeAccountOrThrow();
+  const txHash = await rpc("eth_sendTransaction", [{ from: fromAddress, to, data }]);
+  const start = Date.now();
+  while (Date.now() - start < 90_000) {
+    const rcpt = await rpc("eth_getTransactionReceipt", [txHash]);
+    if (rcpt) {
+      if (rcpt.status === "0x1") return txHash;
+      throw new Error(`${label} reverted`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error(`${label}: receipt timeout`);
+}
+
+async function getPtonByWrapping(ptonFloat) {
+  if (!Number.isFinite(ptonFloat) || ptonFloat <= 0) throw new Error("amount must be > 0");
+  const amount = BigInt(Math.round(ptonFloat * 1_000_000)) * (ATTO / 1_000_000n);
+  const status = document.getElementById("get-pton-status");
+  const enc32 = (a) => a.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const encU = (v) => v.toString(16).padStart(64, "0");
+  await ensureChain();
+  const ch = chainMeta(state.selectedChainId);
+  const { pton } = await resolveDepositTargets();
+  const user = await activeAccountOrThrow();
+  // Underlying TON address: prefer the chain's configured `ton`, else read it
+  // on-chain via PTON.ton().
+  let ton = ch.ton;
+  if (!ton) {
+    const tonHex = await rpc("eth_call", [{ to: pton, data: "0xcc48b947" }, "latest"]);
+    ton = "0x" + String(tonHex).slice(-40);
+  }
+  // 1. Ensure TON balance ≥ amount. There is no faucet — bridged TON must be
+  //    present already (use "Bridge TON from Ethereum" first if short).
+  const tonBal = BigInt(await rpc("eth_call", [{ to: ton, data: "0x70a08231" + enc32(user) }, "latest"]));
+  if (tonBal < amount) {
+    throw new Error(`Insufficient TON on ${ch.name}. Use 'Bridge TON from Ethereum' first.`);
+  }
+  // 2. Approve PTON to pull TON, if the allowance is short.
+  const allowance = BigInt(
+    await rpc("eth_call", [{ to: ton, data: "0xdd62ed3e" + enc32(user) + enc32(pton) }, "latest"]),
+  );
+  if (allowance < amount) {
+    setStatus(status, "Approving TON…");
+    await sendTxAndWait(ton, "0x095ea7b3" + enc32(pton) + encU(amount), "TON.approve");
+  }
+  // 3. Wrap TON → PTON (PTON.deposit pulls TON and mints PTON 1:1).
+  setStatus(status, "Wrapping TON → PTON…");
+  await sendTxAndWait(pton, "0xb6b55f25" + encU(amount), "PTON.deposit");
+  setStatus(status, `Wrapped ${ptonFloat} PTON — you can deposit now.`, "ok");
+  await loadWalletHoldings();
+  renderKpis();
+}
+
+// Show the "Get PTON" wrap helper only off Ethereum (canonical PTON / swap there)
+// and surface the wallet's PTON balance on the selected network.
+function updateGetPton() {
+  const row = document.getElementById("get-pton-row");
+  if (!row) return;
+  row.hidden = state.selectedChainId === 1;
+  const el = document.getElementById("topup-wallet-pton-inline");
+  if (el) el.textContent = state.walletPton != null ? fmtPton(state.walletPton) : "—";
+}
+
+function wireGetPton() {
+  const btn = document.getElementById("get-pton-btn");
   if (!btn) return;
   btn.addEventListener("click", async () => {
-    const status = $("#faucet-status");
-    const v = parseFloat($("#faucet-amount").value);
+    const status = document.getElementById("get-pton-status");
+    const v = parseFloat($("#topup-amount").value);
     if (!Number.isFinite(v) || v <= 0) {
-      setStatus(status, "Amount must be > 0", "err");
+      setStatus(status, "Enter a top-up amount first.", "err");
       return;
     }
     btn.disabled = true;
-    setStatus(status, "Awaiting wallet signature…");
     try {
-      const tx = await mintFaucet(v);
-      setStatusHtml(status, `Minted ${escape(String(v))} PTON (tx ${fmtLink(tx, "tx")}).`, "ok");
-      await refreshAll();
+      await getPtonByWrapping(v);
     } catch (e) {
-      setStatus(status, `Failed: ${e.message}`, "err");
+      setStatus(status, `Get PTON failed: ${friendlyError(e.message)}`, "err");
     } finally {
       btn.disabled = false;
     }
   });
+}
+
+// Map known contract-revert selectors / patterns to human messages; otherwise
+// trim viem's verbose multi-line dump to its first meaningful line.
+function friendlyError(msg) {
+  const m = String(msg ?? "");
+  if (m.includes("0xe450d38c") || /ERC20InsufficientBalance/i.test(m)) {
+    // On Ethereum there is no "Get PTON" helper (canonical PTON / Swap card),
+    // so the guidance differs by selected network.
+    return state.selectedChainId === 1
+      ? "You have no PTON on Ethereum. Switch the Network (top bar) to Base to bridge TON → wrap → top up, or use the Swap card."
+      : 'Insufficient PTON on this network — bridge TON from Ethereum, then use the "Get PTON" button above to wrap TON → PTON first.';
+  }
+  if (/insufficient funds/i.test(m)) return "Insufficient native gas (ETH) on this network.";
+  if (/AuthorizationExpired|expired/i.test(m)) return "Authorization expired — re-quote and try again.";
+  const first = m.split("\n")[0].trim();
+  return first.length > 160 ? `${first.slice(0, 157)}…` : first;
 }
 
 function wireTopup() {
@@ -1986,7 +2215,18 @@ function wireTopup() {
       setStatusHtml(status, `Deposit confirmed (tx ${fmtLink(r.txHash, "tx")}).`, "ok");
       await refreshAll();
     } catch (e) {
-      setStatus(status, `Failed: ${e.message}`, "err");
+      setStatus(status, `Failed: ${friendlyError(e.message)}`, "err");
+      // If the deposit failed for lack of PTON on a non-Ethereum network, make
+      // sure the "Get PTON" helper is visible and bring it into view so the
+      // error's suggested action is right there.
+      const em = String(e.message ?? "");
+      if (
+        state.selectedChainId !== 1 &&
+        (em.includes("0xe450d38c") || /ERC20InsufficientBalance/i.test(em))
+      ) {
+        updateGetPton();
+        document.getElementById("get-pton-row")?.scrollIntoView({ block: "nearest" });
+      }
     } finally {
       $("#topup-btn").disabled = false;
     }
@@ -2587,9 +2827,9 @@ async function boot() {
   wireNetworkSwitcher();
   renderNetworkSwitcher();
   wireBridge();
+  wireGetPton();
   updateSwapForChain();
   wireKeyCreate();
-  wireFaucet();
   wireTopup();
   wireSwap();
   wireCallsPager();

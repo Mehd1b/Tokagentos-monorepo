@@ -13,6 +13,9 @@
 
 import type { Route, RouteRequest, RouteResponse, IAgentRuntime } from "@elizaos/core";
 import type { IncomingMessage } from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
 import {
   mintApiKey,
   listApiKeys,
@@ -185,6 +188,149 @@ async function handleRevokeKey(
 }
 
 // ---------------------------------------------------------------------------
+// POST /v1/keys/install — write BILLING_CHAT_KEY to project .env
+// ---------------------------------------------------------------------------
+//
+// LOCAL ONLY. This endpoint runs on the user's local agent (whether it's
+// configured as billing client or billing server) and:
+//   1. Validates the request body has a syntactically valid `sk-ai-*` key
+//   2. Atomically upserts `BILLING_CHAT_KEY=<key>` into `<cwd>/.env`
+//      (preserving all other entries; existing commented `# BILLING_CHAT_KEY`
+//      lines are replaced in place rather than duplicated)
+//   3. Mirrors the new value into process.env immediately so in-flight
+//      chat calls pick it up without waiting for the restart
+//
+// The restart itself is DELEGATED to the existing `POST /api/restart`
+// endpoint — the dashboard calls this install endpoint first, and then
+// the restart endpoint second. Splitting them avoids duplicating restart
+// strategy logic across runners (dev-ui in-process bounce, prod CLI
+// supervisor catching exit 75, etc.) and keeps this route a pure
+// "write the file" operation.
+//
+// AUTH: requires the same authenticated identity as the rest of /v1/keys/*
+// (SIWE session OR existing API key). Format-validates `sk-ai-...` but does
+// not verify the key was minted by this user — anyone with shell access to
+// the user's machine could already edit .env directly, so the auth check
+// is meant to guard against trivial CSRF, not a malicious LAN attacker.
+const SK_AI_KEY_RE = /^sk-ai-[A-Za-z0-9_-]{16,128}$/;
+
+async function readIfExists(filePath: string): Promise<string | null> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+/**
+ * Atomically upsert `KEY=VALUE` in a project-root .env file.
+ *
+ * - If the key already exists on a line (commented or not), replace that
+ *   line with the new uncommented `KEY=VALUE`.
+ * - Otherwise append `KEY=VALUE` to the end (with one preceding blank line
+ *   if the file ends with non-empty content).
+ *
+ * Atomicity: write to `<filePath>.tmp` then rename. The rename is atomic
+ * on POSIX. We do NOT keep a `.bak` for the project .env because users
+ * version-control their .env templates separately and the .env itself is
+ * gitignored — a `.bak` would just be visual noise.
+ *
+ * Values are written verbatim (no quoting). sk-ai-* keys are URL-safe
+ * base64 (`/^sk-ai-[A-Za-z0-9_-]+$/`) so they never need quoting; callers
+ * MUST validate before invoking this function.
+ */
+async function upsertDotenvLine(
+  filePath: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  const existing = (await readIfExists(filePath)) ?? "";
+  const lines = existing.length === 0 ? [] : existing.split(/\r?\n/);
+  // dotenv-style split leaves a trailing empty element for files ending in
+  // newline. Strip it so we can manage trailing newlines explicitly.
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  const re = new RegExp(`^\\s*#?\\s*${key.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\s*=`);
+  let updatedAt = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (re.test(lines[i] ?? "")) {
+      lines[i] = `${key}=${value}`;
+      updatedAt = i;
+      break;
+    }
+  }
+  if (updatedAt < 0) {
+    if (lines.length > 0 && (lines[lines.length - 1] ?? "").trim() !== "") {
+      lines.push("");
+    }
+    lines.push(`${key}=${value}`);
+  }
+  const nextContents = `${lines.join("\n")}\n`;
+  const tmp = `${filePath}.tmp`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const handle = await fs.open(tmp, "w", 0o600);
+  try {
+    await handle.writeFile(nextContents, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await fs.rename(tmp, filePath);
+}
+
+async function handleInstallKey(
+  req: RouteRequest,
+  res: RouteResponse,
+  _runtime: IAgentRuntime,
+): Promise<void> {
+  // Auth check. In client-mode, `resolveBillingIdentity` returns null (no
+  // local DB / authSecret) — but the local user is the one running the
+  // server, and we serve this from localhost only, so we accept the request
+  // unconditionally in client-mode as long as the body is well-formed.
+  // In server-mode, require a valid identity.
+  const identity = await resolveBillingIdentity(toIncomingMessage(req));
+  const billingState = getBillingState();
+  const isClientMode = billingState.config.billingMode === "client";
+  if (!identity && !isClientMode) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+
+  const body = req.body as Record<string, unknown> | undefined;
+  const key = typeof body?.["key"] === "string" ? body["key"].trim() : "";
+  if (!SK_AI_KEY_RE.test(key)) {
+    res.status(400).json({
+      error: "Invalid key format — expected sk-ai-... (16+ url-safe chars).",
+    });
+    return;
+  }
+
+  const envPath = path.join(process.cwd(), ".env");
+  try {
+    await upsertDotenvLine(envPath, "BILLING_CHAT_KEY", key);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to write .env: ${message}` });
+    return;
+  }
+
+  // Update in-flight env so subsequent chat calls work even before restart.
+  // configureBillingChatMirror() at startup mirrors BILLING_CHAT_KEY → OPENAI_API_KEY,
+  // but the OpenAI plugin may cache its key at init — restart is still the safe
+  // path. The dashboard calls POST /api/restart after this returns 200.
+  process.env["BILLING_CHAT_KEY"] = key;
+  process.env["OPENAI_API_KEY"] = key;
+
+  res.status(200).json({
+    ok: true,
+    envPath,
+    message: "Key saved to .env. Call POST /api/restart to apply.",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Route definitions
 // ---------------------------------------------------------------------------
 
@@ -196,6 +342,18 @@ export const keysRoutes: Route[] = [
     public: true,
     name: "billing-keys-mint",
     handler: handleMintKey,
+  },
+  // MUST be registered BEFORE the /v1/keys/:id DELETE route in the array
+  // (routes are matched in registration order on rawPath: true with
+  // params). `install` is a string literal that could otherwise match the
+  // `:id` param and route the install POST through revoke handling.
+  {
+    type: "POST",
+    path: "/v1/keys/install",
+    rawPath: true,
+    public: true,
+    name: "billing-keys-install",
+    handler: handleInstallKey,
   },
   {
     type: "GET",
@@ -234,6 +392,18 @@ function clientKeysRoutes(): Route[] {
           getBillingState().gateway!.keys.create(pickForward(req), body),
         );
       },
+    },
+    // /v1/keys/install is LOCAL on both modes (writes the local agent's
+    // own .env), so it uses the same direct handler as server-mode.
+    // Must precede /v1/keys/:id in this array for the same param-matching
+    // reason explained on the server-mode array.
+    {
+      type: "POST",
+      path: "/v1/keys/install",
+      rawPath: true,
+      public: true,
+      name: "billing-keys-install",
+      handler: handleInstallKey,
     },
     {
       type: "GET",

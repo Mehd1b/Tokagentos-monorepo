@@ -1974,3 +1974,16 @@ html[data-embed="1"] footer { display: none; }
 }
 .swap-base-notice p { margin: 0; }
 .swap-base-notice .btn { margin-top: 6px; }
+/* On-chain TON balance readouts (Ethereum L1 + bridged L2) shown in the bridge
+   panel. Compact, mono values matching the rest of the estimate-line style. */
+.swap-base-notice .bridge-balance-line { padding: 2px 0; }
+.swap-base-notice .bridge-balance-line .est-val { color: var(--text-soft); }
+/* The `hidden` attribute must win over the display:flex on .swap-base-notice
+   and the swap body's .form-row/.swap-arrow/.slippage-row/.estimate-line.
+   Scope an id+attribute rule (specificity beats those class rules) so a hidden
+   child of the swap card actually collapses — the bridge notice only shows on
+   non-Ethereum networks, the swap body only on Ethereum. */
+#swap-card [hidden] { display: none; }
+/* Same reasoning for the "Get PTON" row in the top-up card (.estimate-line is
+   display:flex, which would otherwise override its `hidden` attribute). */
+#get-pton-row[hidden] { display: none; }

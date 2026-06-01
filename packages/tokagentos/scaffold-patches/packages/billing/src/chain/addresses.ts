@@ -20,6 +20,16 @@ export interface BillingChainAddresses {
    * TON token deployed alongside PTON, exposing a public `faucet()`.
    */
   ton?: Address | null;
+  /**
+   * OP-Stack bridge descriptor for chains whose TON is bridged from an L1 (e.g. Base).
+   * Absent on the canonical L1 chain itself (Ethereum).
+   */
+  bridge?: {
+    fromChainId: number;        // L1 chain id (1 = Ethereum)
+    l1Token: Address;           // L1 TON to bridge (== ETHEREUM_MAINNET.ton)
+    l1StandardBridge: Address;  // OP Standard Bridge on L1
+    minGasLimit: number;        // depositERC20To minGasLimit
+  } | null;
   /** Notes about provenance and any caveats (e.g. anvil-fork, not production). */
   notes: string;
 }
@@ -98,13 +108,17 @@ export const POLYGON: BillingChainAddresses = {
 export const BASE_MAINNET: BillingChainAddresses = {
   chainId: 8453,
   name: 'Base',
-  pton: '0xb05D73E931bf329bd995c64696E7D833C08650b1' as Address,
-  claudeVault: '0x0052258E517835081c94c0B685409f2EfC4D502b' as Address,
-  ton: '0x3f89CD27fD877827E7665A9883b3c0180E22A525' as Address,
+  pton: '0x26C8F112769fb3A3A8de267CfFf60E9f317445e5' as Address,
+  claudeVault: '0x94815CC764EcffA8fEA1719c548F9C4980966e44' as Address,
+  ton: '0xc04ecd829cD6c97cd5510b513b6419a84BA1Cc46' as Address,
+  bridge: {
+    fromChainId: 1,
+    l1Token: '0x2be5e8c109e2197D077D13A82dAead6a9b3433C5' as Address,
+    l1StandardBridge: '0x3154Cf16ccdb4C6d922629664174b904d80F2C35' as Address,
+    minGasLimit: 200000,
+  },
   notes:
-    'LIVE Base mainnet deploy (2026-06-01). admin=operator=0x3ec2c9fb15C222Aa273F3f2F20a740FA86b4F618. ' +
-    'Chain-side TON (0x3f89CD27…A525) is a Base-native TON token with a public faucet() — ' +
-    'no canonical TON bridge to Base exists. Users obtain TON via faucet, then PTON.deposit() to wrap.',
+    'LIVE Base mainnet CANONICAL deploy (2026-06-01). L2 TON (0xc04ecd829cD6c97cd5510b513b6419a84BA1Cc46) is an OptimismMintableERC20 bridge-minted 1:1 from the real Tokamak TON on Ethereum (no faucet, supply gated to the OP StandardBridge). PTON wraps it (faucet OFF). admin=operator=0x3ec2c9fb15C222Aa273F3f2F20a740FA86b4F618. Bridge real TON via L1StandardBridge.depositERC20To, then PTON.deposit() to wrap. Supersedes the prior demo-faucet TON deploy.',
 } as const;
 
 export const BILLING_CHAIN_MAP: ReadonlyMap<number, BillingChainAddresses> = new Map([

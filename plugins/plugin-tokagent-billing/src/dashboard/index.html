@@ -127,7 +127,7 @@
       <!-- ---- Balance hero ---- -->
       <section class="hero">
         <div class="hero-main">
-          <div class="hero-eyebrow">Spendable balance</div>
+          <div class="hero-eyebrow">Spendable balance · <span id="hero-network">—</span></div>
           <div class="hero-balance">
             <span id="kpi-balance" class="hero-num">—</span>
             <span class="hero-unit">PTON</span>
@@ -217,6 +217,16 @@
             <span class="est-val">$<span id="topup-usd">—</span></span>
           </div>
 
+          <!-- Get PTON: a top-up deposits PTON you already hold. On networks with
+               no canonical PTON (e.g. Base), wrap bridged TON → PTON first. Shown
+               only off Ethereum (approve TON → PTON.deposit). Bridge TON from
+               Ethereum first if the wallet is short. -->
+          <div class="estimate-line subtle" id="get-pton-row" hidden>
+            <span class="est-label">Wallet PTON: <span id="topup-wallet-pton-inline">—</span></span>
+            <button id="get-pton-btn" type="button" class="link-btn">Get PTON (wrap TON)</button>
+          </div>
+          <p id="get-pton-status" class="status-line" role="status" aria-live="polite"></p>
+
           <button id="topup-btn" class="btn btn-primary btn-block btn-cta" type="button">Sign &amp; deposit</button>
           <p id="topup-status" class="status-line" role="status" aria-live="polite"></p>
           <p class="muted xsmall">
@@ -236,26 +246,32 @@
 
           <!-- Shown only when a non-Ethereum network is selected: swaps route
                through TON's Ethereum liquidity, so they're Ethereum-only.
-               Instead we offer a credit-level bridge from Ethereum. -->
+               Instead we bridge REAL TON from Ethereum via the OP-Stack
+               L1StandardBridge. Bridged TON → wrap to PTON ("Get PTON") → top up. -->
           <div id="swap-base-notice" class="swap-base-notice" hidden>
             <p class="muted small">
               Token swaps route through TON's Ethereum liquidity, so
               <strong>Swap is Ethereum-only</strong>.
             </p>
             <p class="muted xsmall">
-              Bridge spendable credits from Ethereum to
-              <span id="bridge-target-name">this network</span>.
+              Bridge real TON from Ethereum to
+              <span id="bridge-target-name">this network</span>, then wrap it to
+              PTON ("Get PTON") and top up.
             </p>
-            <div class="estimate-line subtle">
-              <span class="est-label">Backed on <span id="bridge-target-name-2">network</span></span>
-              <span class="est-val"><span id="bridge-backing">—</span> PTON</span>
+            <div class="estimate-line subtle bridge-balance-line">
+              <span class="est-label">Ethereum TON</span>
+              <span class="est-val"><span id="bridge-l1-ton">—</span> TON</span>
+            </div>
+            <div class="estimate-line subtle bridge-balance-line">
+              <span class="est-label"><span id="bridge-target-name-2">Base</span> TON</span>
+              <span class="est-val"><span id="bridge-l2-ton">—</span> TON</span>
             </div>
             <div class="amount-input">
               <input id="bridge-amount" type="number" step="0.1" min="0.1" placeholder="0.0" inputmode="decimal" />
-              <span class="amount-unit">PTON</span>
+              <span class="amount-unit">TON</span>
             </div>
             <button id="bridge-btn" class="btn btn-primary btn-block btn-cta" type="button">
-              Bridge from Ethereum
+              Bridge TON from Ethereum
             </button>
             <p id="bridge-status" class="status-line" role="status" aria-live="polite"></p>
           </div>

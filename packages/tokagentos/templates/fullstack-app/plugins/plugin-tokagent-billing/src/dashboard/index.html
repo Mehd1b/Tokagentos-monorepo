@@ -217,10 +217,10 @@
             <span class="est-val">$<span id="topup-usd">—</span></span>
           </div>
 
-          <!-- Get PTON: a top-up deposits PTON you already hold. On networks with
-               no canonical PTON (e.g. Base), wrap bridged TON → PTON first. Shown
-               only off Ethereum (approve TON → PTON.deposit). Bridge TON from
-               Ethereum first if the wallet is short. -->
+          <!-- Get PTON: a top-up deposits PTON you already hold. This wraps the
+               chain's underlying TON → PTON (Ethereum: real L1 TON; Base: bridged
+               L2 TON) via approve → PTON.deposit. Shown on any chain with a
+               wrappable TON. On Base, bridge TON from Ethereum first if short. -->
           <div class="estimate-line subtle" id="get-pton-row" hidden>
             <span class="est-label">Wallet PTON: <span id="topup-wallet-pton-inline">—</span></span>
             <button id="get-pton-btn" type="button" class="link-btn">Get PTON (wrap TON)</button>

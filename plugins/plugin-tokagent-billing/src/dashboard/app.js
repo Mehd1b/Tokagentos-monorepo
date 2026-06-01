@@ -2134,7 +2134,10 @@ async function getPtonByWrapping(ptonFloat) {
   //    present already (use "Bridge TON from Ethereum" first if short).
   const tonBal = BigInt(await rpc("eth_call", [{ to: ton, data: "0x70a08231" + enc32(user) }, "latest"]));
   if (tonBal < amount) {
-    throw new Error(`Insufficient TON on ${ch.name}. Use 'Bridge TON from Ethereum' first.`);
+    const hint = ch.bridge
+      ? "Use 'Bridge TON from Ethereum' first."
+      : "Acquire TON first, or use Swap to buy PTON.";
+    throw new Error(`Insufficient TON on ${ch.name}. ${hint}`);
   }
   // 2. Approve PTON to pull TON, if the allowance is short.
   const allowance = BigInt(
@@ -2157,7 +2160,10 @@ async function getPtonByWrapping(ptonFloat) {
 function updateGetPton() {
   const row = document.getElementById("get-pton-row");
   if (!row) return;
-  row.hidden = state.selectedChainId === 1;
+  // Show the wrap helper on any chain with a wrappable underlying TON
+  // (Ethereum: real L1 TON; Base: bridged L2 TON). Hidden only where the chain
+  // exposes no TON to wrap.
+  row.hidden = !chainMeta(state.selectedChainId).ton;
   const el = document.getElementById("topup-wallet-pton-inline");
   if (el) el.textContent = state.walletPton != null ? fmtPton(state.walletPton) : "—";
 }

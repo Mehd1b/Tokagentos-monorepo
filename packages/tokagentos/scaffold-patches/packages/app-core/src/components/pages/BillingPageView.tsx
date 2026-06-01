@@ -29,12 +29,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// tokagentOS gold brand tokens (mirrors www.tokagentos.com / brand-gold.css).
-// The dashboard uses CSS custom properties of the same names, so this object
-// is a direct :root override on the iframe document. Kept inline (not
-// imported) because scaffold-patches must stay independent of any specific
-// app's bundling.
-const PARENT_THEME_TOKENS = {
+// tokagentOS gold brand tokens for the embedded billing dashboard, mirroring
+// brand-gold.css / base.css. The dashboard keys every visual off :root custom
+// properties, so we postMessage the active theme's tokens (light or dark) and
+// re-push when the app theme changes. Kept inline (not imported) so
+// scaffold-patches stay independent of any app's bundling.
+const DARK_TOKENS = {
   bg0: "#050506",
   bg1: "rgba(255,255,255,0.05)",
   bg2: "#0a0a0c",
@@ -44,6 +44,47 @@ const PARENT_THEME_TOKENS = {
   accent: "#f0b90b",
   accent2: "#f3ba2f",
 } as const;
+
+const LIGHT_TOKENS = {
+  bg0: "#f7f8fa",
+  bg1: "rgba(0,0,0,0.04)",
+  bg2: "#ffffff",
+  line: "rgba(0,0,0,0.10)",
+  text: "#1e2329",
+  muted: "#5e6673",
+  accent: "#f0b90b",
+  accent2: "#d8a000",
+} as const;
+
+/** Read the app's active theme from the document root (.dark / data-theme). */
+function isDarkTheme(): boolean {
+  if (typeof document === "undefined") return true;
+  const root = document.documentElement;
+  return (
+    root.classList.contains("dark") ||
+    root.getAttribute("data-theme") === "dark"
+  );
+}
+
+/** Push the active theme's tokens to the dashboard iframe (best-effort). */
+function pushThemeToIframe(win: Window | null | undefined): void {
+  if (!win) return;
+  const dark = isDarkTheme();
+  try {
+    win.postMessage(
+      {
+        source: "tal-host",
+        type: "theme",
+        tokens: dark ? DARK_TOKENS : LIGHT_TOKENS,
+        mode: dark ? "dark" : "light",
+      },
+      location.origin,
+    );
+  } catch {
+    // Same-origin postMessage is best-effort; the ?embed=1 first-paint hint
+    // already covers initial styling, so swallow the failure silently.
+  }
+}
 
 function BillingPageView(): React.ReactElement {
   // Pick the dashboard if billing is configured, the setup wizard if not.
@@ -78,26 +119,25 @@ function BillingPageView(): React.ReactElement {
     };
   }, []);
 
-  // Push theme tokens once the iframe has loaded. The dashboard listens
-  // for `{ source: "tal-host", type: "theme", tokens }` messages and
-  // writes the values onto :root via document.documentElement.style.
+  // Re-push the theme to the iframe whenever the app toggles light/dark, so
+  // the embedded dashboard tracks the parent theme live (not just on load).
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => {
+      pushThemeToIframe(iframeRef.current?.contentWindow);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  // Push the active theme's tokens once the iframe has loaded. The dashboard
+  // listens for `{ source: "tal-host", type: "theme", tokens, mode }` and
+  // writes them onto :root, so a single push re-skins it.
   const handleIframeLoad = (): void => {
-    const w = iframeRef.current?.contentWindow;
-    if (!w) return;
-    try {
-      w.postMessage(
-        {
-          source: "tal-host",
-          type: "theme",
-          tokens: PARENT_THEME_TOKENS,
-          mode: "dark",
-        },
-        location.origin,
-      );
-    } catch {
-      // Same-origin postMessage is best-effort; first-paint query param
-      // already covers the styling, so swallow the failure silently.
-    }
+    pushThemeToIframe(iframeRef.current?.contentWindow);
   };
 
   // Use flex-fill (NOT position:absolute/inset:0) so the parent's
@@ -111,7 +151,7 @@ function BillingPageView(): React.ReactElement {
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
-        background: "#050506",
+        background: "var(--bg)",
       }}
     >
       {loading ? (
@@ -121,7 +161,7 @@ function BillingPageView(): React.ReactElement {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#9ca3af",
+            color: "var(--muted)",
             fontSize: "0.9rem",
           }}
         >
@@ -140,7 +180,7 @@ function BillingPageView(): React.ReactElement {
           style={{
             flex: 1,
             border: "none",
-            background: "#050506",
+            background: "var(--bg)",
           }}
           allow="clipboard-read; clipboard-write"
         />

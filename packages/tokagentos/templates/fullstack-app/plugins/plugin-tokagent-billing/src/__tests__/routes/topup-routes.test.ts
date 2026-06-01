@@ -10,13 +10,14 @@
  */
 
 import { describe, it, beforeAll, afterAll, beforeEach, expect, vi } from "vitest";
-import { topupRoutes } from "../../routes/topup-routes.js";
+import { topupRoutes, resetTopupState } from "../../routes/topup-routes.js";
 import {
   setBillingState,
   clearBillingState,
   type BillingPluginState,
 } from "../../state.js";
 import { createTestDb, type TestDbHandle } from "../db-harness.js";
+import { BASE_MAINNET, ptonDomain } from "@tokagentos/billing";
 import type { RouteRequest, RouteResponse, IAgentRuntime } from "@elizaos/core";
 import type { Address } from "viem";
 
@@ -206,6 +207,58 @@ describe("POST /v1/topup/quote", () => {
     await handler(makeReq({}), res, fakeRuntime);
     expect(res.statusCode).toBe(503);
   });
+
+  it("returns Base pton/vault/domain when chainId:8453 is provided", async () => {
+    const res = makeRes();
+    await handler(makeReq({ chainId: 8453 }), res, fakeRuntime);
+    expect(res.statusCode).toBe(200);
+    const body = res.body as {
+      chainId: number;
+      vaultAddress: string;
+      ptonAddress: string;
+      domain: { chainId: number; verifyingContract: string };
+    };
+    expect(body.chainId).toBe(8453);
+    expect(body.ptonAddress.toLowerCase()).toBe(BASE_MAINNET.pton!.toLowerCase());
+    expect(body.vaultAddress.toLowerCase()).toBe(BASE_MAINNET.claudeVault!.toLowerCase());
+    // Domain must bind the resolved chain + pton (verifyingContract).
+    const expectedDomain = ptonDomain(8453, BASE_MAINNET.pton!);
+    expect(body.domain.chainId).toBe(expectedDomain.chainId);
+    expect((body.domain.verifyingContract ?? "").toLowerCase()).toBe(
+      String(expectedDomain.verifyingContract).toLowerCase(),
+    );
+  });
+
+  it("returns 400 for an unsupported chainId", async () => {
+    const res = makeRes();
+    // 137 (Polygon) is registered in BILLING_CHAIN_MAP but has null pton/vault.
+    await handler(makeReq({ chainId: 137 }), res, fakeRuntime);
+    expect(res.statusCode).toBe(400);
+    const body = res.body as { error: string };
+    expect(body.error).toBe("Unsupported or unconfigured chain: 137");
+  });
+
+  it("returns 400 for a chainId with no map entry at all", async () => {
+    const res = makeRes();
+    await handler(makeReq({ chainId: 999999 }), res, fakeRuntime);
+    expect(res.statusCode).toBe(400);
+    const body = res.body as { error: string };
+    expect(body.error).toBe("Unsupported or unconfigured chain: 999999");
+  });
+
+  it("falls back to config chain when chainId is omitted (backward compatible)", async () => {
+    const res = makeRes();
+    await handler(makeReq({}), res, fakeRuntime);
+    expect(res.statusCode).toBe(200);
+    const body = res.body as {
+      chainId: number;
+      vaultAddress: string;
+      ptonAddress: string;
+    };
+    expect(body.chainId).toBe(1);
+    expect(body.vaultAddress.toLowerCase()).toBe(VAULT_ADDRESS.toLowerCase());
+    expect(body.ptonAddress.toLowerCase()).toBe(PTON_ADDRESS.toLowerCase());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -250,6 +303,113 @@ describe("POST /v1/topup/settle", () => {
       fakeRuntime,
     );
     expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 400 for an unsupported settle chainId", async () => {
+    const res = makeRes();
+    await handler(
+      makeReq({
+        chainId: 137,
+        topupId: "00000000-0000-0000-0000-000000000001",
+        signature: { v: 27, r: "0x" + "a".repeat(64), s: "0x" + "b".repeat(64) },
+      }),
+      res,
+      fakeRuntime,
+    );
+    expect(res.statusCode).toBe(400);
+    expect((res.body as { error: string }).error).toBe(
+      "Unsupported or unconfigured chain: 137",
+    );
+  });
+
+  it("returns 400 'Settlement not available' when chain has no operator client", async () => {
+    // chainId 8453 is selectable, but no BILLING_BASE_RPC_URL is set and
+    // it is not the configured chain (1), so no operator client exists.
+    delete process.env.BILLING_BASE_RPC_URL;
+    const res = makeRes();
+    await handler(
+      makeReq({
+        chainId: 8453,
+        topupId: "00000000-0000-0000-0000-000000000001",
+        signature: { v: 27, r: "0x" + "a".repeat(64), s: "0x" + "b".repeat(64) },
+      }),
+      res,
+      fakeRuntime,
+    );
+    expect(res.statusCode).toBe(400);
+    expect((res.body as { error: string }).error).toBe(
+      "Settlement not available for chain 8453 (no operator client configured)",
+    );
+  });
+
+  it("resolves the Base vault for the authorization.to cross-check (chainId:8453)", async () => {
+    // Build an operator client for Base so getClientsForChain succeeds, then
+    // create a Base quote and submit an X-PAYMENT whose authorization.to is the
+    // CONFIG (Ethereum) vault — the resolved Base vault must drive the check,
+    // so we expect a 400 whose message references the Base vault address.
+    // Use a raw env assignment (not vi.stubEnv) so the finally block can clear
+    // it without disturbing the NODE_ENV stub installed in beforeAll.
+    process.env.BILLING_BASE_RPC_URL = "https://mainnet.base.org";
+    resetTopupState();
+    // getClientsForChain builds a viem account from config.operatorPrivateKey;
+    // provide a valid dummy 32-byte key + RPC fields so createBillingClients
+    // succeeds for the Base path.
+    await clearBillingState();
+    setBillingState({
+      pool: { end: async () => {} } as unknown as BillingPluginState["pool"],
+      db: handle.db,
+      clients: {} as BillingPluginState["clients"],
+      config: makeConfig({
+        operatorPrivateKey: ("0x" + "1".repeat(64)) as `0x${string}`,
+        chainRpcUrl: "https://mainnet.example",
+        mainnetRpcUrl: "https://mainnet.example",
+      }),
+    });
+    try {
+      // Create a quote on Base so the settle's quote lookup succeeds.
+      const quoteHandler = findHandler("POST", "/v1/topup/quote");
+      const quoteRes = makeRes();
+      await quoteHandler(makeReq({ chainId: 8453 }), quoteRes, fakeRuntime);
+      expect(quoteRes.statusCode).toBe(200);
+      const { topupId } = quoteRes.body as { topupId: string };
+
+      const xPayment = Buffer.from(
+        JSON.stringify({
+          x402Version: 1,
+          scheme: "exact",
+          network: 8453,
+          payload: {
+            signature: { v: 27, r: "0x" + "a".repeat(64), s: "0x" + "b".repeat(64) },
+            authorization: {
+              from: WALLET,
+              // Wrong vault on purpose — config (Ethereum) vault, not Base's.
+              to: VAULT_ADDRESS,
+              value: "0",
+              validAfter: "0",
+              validBefore: "9999999999",
+              nonce: "0x" + "c".repeat(64),
+            },
+            quoteId: topupId,
+          },
+        }),
+        "utf8",
+      ).toString("base64");
+
+      const res = makeRes();
+      await handler(
+        makeReq({ chainId: 8453 }, { headers: { "x-dev-wallet": WALLET, "x-payment": xPayment } }),
+        res,
+        fakeRuntime,
+      );
+      expect(res.statusCode).toBe(400);
+      const err = (res.body as { error: string }).error;
+      // The check must reference the resolved BASE vault, not the config vault.
+      expect(err.toLowerCase()).toContain(BASE_MAINNET.claudeVault!.toLowerCase());
+      expect(err.toLowerCase()).not.toContain(VAULT_ADDRESS.toLowerCase());
+    } finally {
+      delete process.env.BILLING_BASE_RPC_URL;
+      resetTopupState();
+    }
   });
 });
 

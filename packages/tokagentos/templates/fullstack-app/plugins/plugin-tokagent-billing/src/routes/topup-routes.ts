@@ -47,6 +47,11 @@ import {
 import { resolveBillingIdentity } from "../middleware/api-key-resolve.js";
 import { createRateLimiter, type TokenBucketLimiter } from "../middleware/rate-limit.js";
 import { pickForward, forward, ensureClientReady } from "../lib/forward.js";
+import {
+  resolveBillingChain,
+  getClientsForChain,
+  resetChainClients,
+} from "../lib/chain-resolve.js";
 
 // ---------------------------------------------------------------------------
 // Module-level settle rate limiter (lazy-init)
@@ -72,6 +77,15 @@ export function resetSettleLimiter(): void {
   _settleLimiter = null;
 }
 
+/**
+ * Reset all top-up module-level singletons (settle limiter + per-chain clients
+ * cache). Convenience wrapper for Plugin.dispose / test isolation.
+ */
+export function resetTopupState(): void {
+  resetSettleLimiter();
+  resetChainClients();
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -95,6 +109,21 @@ function getTonUsd(): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract an optional `chainId` from a raw value (JSON body field or decoded
+ * X-PAYMENT `network`). Returns `undefined` when absent/empty so the caller can
+ * fall back to `config.chainId` (backward-compatible single-chain behavior).
+ *
+ * Returns `null` when the value is present but not a positive integer chainId,
+ * so the caller can emit a deterministic 400 instead of silently coercing.
+ */
+function parseChainId(raw: unknown): number | undefined | null {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) return null;
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,18 +159,39 @@ async function handleTopupInfo(
     return;
   }
 
-  const domain = ptonDomain(config.chainId, config.ptonAddress);
+  // Optional ?chainId= — resolve to a selectable chain's addresses; absent
+  // falls back to config.chainId (backward-compatible).
+  const queryChainId = parseChainId(req.query?.["chainId"]);
+  if (queryChainId === null) {
+    res.status(400).json({ error: "Invalid chainId query parameter." });
+    return;
+  }
+  let chainId = config.chainId;
+  let ptonAddress = config.ptonAddress;
+  let vaultAddress = config.vaultAddress;
+  if (queryChainId !== undefined) {
+    const resolved = resolveBillingChain(queryChainId);
+    if (!resolved.ok) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    chainId = resolved.chain.chainId;
+    ptonAddress = resolved.chain.ptonAddress;
+    vaultAddress = resolved.chain.vaultAddress;
+  }
+
+  const domain = ptonDomain(chainId, ptonAddress);
   res.status(200).json({
-    chainId: config.chainId,
-    vaultAddress: config.vaultAddress,
-    ptonAddress: config.ptonAddress,
+    chainId,
+    vaultAddress,
+    ptonAddress,
     // Gateway-compatible aliases — the migrated dashboard SPA reads
     // `info.vault` and `info.asset`. Without these, resolveDepositTargets()
     // leaves both addresses undefined and the faucet/top-up flows send
     // transactions to `to: undefined`, which MetaMask surfaces as
     // "gas limit too high" (its UX for "tx simulation failed").
-    vault: config.vaultAddress,
-    asset: config.ptonAddress,
+    vault: vaultAddress,
+    asset: ptonAddress,
     domain,
   });
 }
@@ -184,6 +234,29 @@ async function handleTopupQuote(
   if (!identity) {
     res.status(401).json({ error: "Authentication required." });
     return;
+  }
+
+  // Optional chainId in the body — resolve to a selectable chain's pton/vault/
+  // domain. Absent falls back to config.chainId (backward-compatible). TON/USD
+  // pricing is chain-agnostic, so getTonUsd() is unchanged.
+  const bodyForChain = req.body as Record<string, unknown> | undefined;
+  const requestedChainId = parseChainId(bodyForChain?.["chainId"]);
+  if (requestedChainId === null) {
+    res.status(400).json({ error: "chainId must be a positive integer." });
+    return;
+  }
+  let chainId = config.chainId;
+  let ptonAddress = config.ptonAddress;
+  let vaultAddress = config.vaultAddress;
+  if (requestedChainId !== undefined) {
+    const resolved = resolveBillingChain(requestedChainId);
+    if (!resolved.ok) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    chainId = resolved.chain.chainId;
+    ptonAddress = resolved.chain.ptonAddress;
+    vaultAddress = resolved.chain.vaultAddress;
   }
 
   const tonUsd = getTonUsd();
@@ -265,9 +338,10 @@ async function handleTopupQuote(
     amountUsd,
     tonUsd,
     expiresAt,
-    vaultAddress: config.vaultAddress,
-    ptonAddress: config.ptonAddress,
-    domain: ptonDomain(config.chainId, config.ptonAddress),
+    chainId,
+    vaultAddress,
+    ptonAddress,
+    domain: ptonDomain(chainId, ptonAddress),
   });
 }
 
@@ -299,7 +373,7 @@ async function handleTopupSettle(
   _runtime: IAgentRuntime,
 ): Promise<void> {
   if (!isBillingStateInitialized()) return billingUnavailable(res);
-  const { db, config, clients } = getServerBillingState();
+  const { db, config, clients: defaultClients } = getServerBillingState();
   if (!config.enabled) return billingUnavailable(res);
 
   const identity = await resolveBillingIdentity(toIncomingMessage(req));
@@ -340,6 +414,10 @@ async function handleTopupSettle(
 
   let topupId: unknown;
   let sigRaw: unknown;
+  // chainId resolution sources (body wins over X-PAYMENT `network`, both
+  // optional; default = config.chainId for backward compatibility).
+  let bodyChainIdRaw: unknown;
+  let networkChainIdRaw: unknown;
   // When the X-PAYMENT header is present the client also includes the full
   // EIP-3009 authorization object it signed over (from, to, value, validAfter,
   // validBefore, nonce). We MUST use those exact bytes for verification —
@@ -359,6 +437,7 @@ async function handleTopupSettle(
       const decoded = JSON.parse(
         Buffer.from(xPaymentRaw, "base64").toString("utf8"),
       ) as {
+        network?: unknown;
         payload?: {
           signature?: { v?: unknown; r?: unknown; s?: unknown };
           authorization?: {
@@ -375,6 +454,7 @@ async function handleTopupSettle(
       topupId = decoded.payload?.quoteId;
       sigRaw = decoded.payload?.signature;
       authFromHeader = decoded.payload?.authorization;
+      networkChainIdRaw = decoded.network;
     } catch (err) {
       res.status(400).json({
         error: `Invalid X-PAYMENT header: ${
@@ -383,11 +463,50 @@ async function handleTopupSettle(
       });
       return;
     }
+    // The body chainId still wins even when the X-PAYMENT header is present.
+    bodyChainIdRaw = (req.body as Record<string, unknown> | undefined)?.["chainId"];
   } else {
     const body = req.body as Record<string, unknown> | undefined;
     topupId = body?.["topupId"];
     sigRaw = body?.["signature"];
+    bodyChainIdRaw = body?.["chainId"];
   }
+
+  // Resolve the settlement chain: body chainId wins over X-PAYMENT `network`;
+  // default = config.chainId. resolveBillingChain enforces the chain is
+  // selectable (pton + claudeVault non-null in BILLING_CHAIN_MAP).
+  const bodyChainId = parseChainId(bodyChainIdRaw);
+  if (bodyChainId === null) {
+    res.status(400).json({ error: "chainId must be a positive integer." });
+    return;
+  }
+  const networkChainId = parseChainId(networkChainIdRaw);
+  // network is best-effort; only a present-but-malformed body chainId is a 400.
+  const requestedChainId =
+    bodyChainId ?? (networkChainId === null ? undefined : networkChainId);
+
+  let resolvedChainId = config.chainId;
+  let resolvedPton = config.ptonAddress;
+  let resolvedVault = config.vaultAddress;
+  if (requestedChainId !== undefined) {
+    const resolved = resolveBillingChain(requestedChainId);
+    if (!resolved.ok) {
+      res.status(400).json({ error: resolved.error });
+      return;
+    }
+    resolvedChainId = resolved.chain.chainId;
+    resolvedPton = resolved.chain.ptonAddress;
+    resolvedVault = resolved.chain.vaultAddress;
+  }
+
+  // Resolve the per-chain operator clients bundle. Same chain → reuse default;
+  // named per-chain RPC env (e.g. BILLING_BASE_RPC_URL) → build+cache; otherwise 400.
+  const clientsResult = getClientsForChain(resolvedChainId, config, defaultClients);
+  if (!clientsResult.ok) {
+    res.status(400).json({ error: clientsResult.error });
+    return;
+  }
+  const clients = clientsResult.clients;
 
   if (typeof topupId !== "string" || !topupId) {
     res.status(400).json({ error: "Missing required field: topupId" });
@@ -436,14 +555,14 @@ async function handleTopupSettle(
   };
 
   if (authFromHeader) {
-    const expectedTo = config.vaultAddress.toLowerCase();
+    const expectedTo = resolvedVault.toLowerCase();
     const expectedFrom = identity.wallet.toLowerCase();
     if (
       typeof authFromHeader.to !== "string" ||
       authFromHeader.to.toLowerCase() !== expectedTo
     ) {
       res.status(400).json({
-        error: `authorization.to must equal vault ${config.vaultAddress}`,
+        error: `authorization.to must equal vault ${resolvedVault}`,
       });
       return;
     }
@@ -477,7 +596,7 @@ async function handleTopupSettle(
     }
     auth = {
       from: identity.wallet,
-      to: config.vaultAddress,
+      to: resolvedVault,
       value: BigInt(authFromHeader.value),
       validAfter: BigInt(authFromHeader.validAfter),
       validBefore: BigInt(authFromHeader.validBefore),
@@ -486,7 +605,7 @@ async function handleTopupSettle(
   } else {
     auth = {
       from: identity.wallet,
-      to: config.vaultAddress,
+      to: resolvedVault,
       value: BigInt(quote.amountPton),
       validAfter: 0n,
       // Valid for 1 hour from quote creation (generous; chain validates validBefore).
@@ -498,8 +617,8 @@ async function handleTopupSettle(
   const valid = await verifyEip3009Signature({
     auth,
     sig: paymentSig,
-    chainId: config.chainId,
-    ptonAddress: config.ptonAddress,
+    chainId: resolvedChainId,
+    ptonAddress: resolvedPton,
   });
 
   if (!valid) {
@@ -514,7 +633,7 @@ async function handleTopupSettle(
   // Submit on-chain deposit.
   let txHash: Hex;
   try {
-    txHash = await depositX402(clients, config.vaultAddress, {
+    txHash = await depositX402(clients, resolvedVault, {
       auth,
       sig: paymentSig,
       topupId: auth.nonce,

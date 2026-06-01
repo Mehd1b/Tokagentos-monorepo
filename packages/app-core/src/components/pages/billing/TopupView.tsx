@@ -14,15 +14,23 @@
  * Uses ethers v6 (existing dep — Decision Z39). No wagmi / viem added.
  */
 
-import { Button, Input, PagePanel } from "@tokagentos/ui";
+import {
+  Badge,
+  Banner,
+  Button,
+  CopyButton,
+  Input,
+  PagePanel,
+  SegmentedControl,
+} from "@tokagentos/ui";
 import type { BrowserProvider, Eip1193Provider, JsonRpcSigner } from "ethers";
 import { useCallback, useEffect, useState } from "react";
 import {
   buildTransferWithAuthMessage,
   decomposeSignature,
   formatAttoPton,
-  topupIdToNonce,
   TRANSFER_WITH_AUTHORIZATION_TYPES,
+  topupIdToNonce,
 } from "./eip712-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +51,7 @@ interface TopupInfo {
 
 interface QuoteResult {
   topupId: string;
+  chainId: number;
   amountPton: string;
   amountUsd: number;
   tonUsd: number;
@@ -55,6 +64,32 @@ interface QuoteResult {
 interface SettleResult {
   txHash: string;
   ok: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Chain selector
+// ---------------------------------------------------------------------------
+
+/** Base = 8453 (default/live), Ethereum = 1. */
+type SupportedChainId = 8453 | 1;
+
+/**
+ * The SegmentedControl component is generic over `T extends string`, so its
+ * option values are the stringified chain ids. We map back to numeric ids at
+ * the boundary (`numericChainId`) for all wallet / backend interactions.
+ */
+type ChainIdString = "8453" | "1";
+
+const CHAINS: Record<
+  SupportedChainId,
+  { name: string; short: string; hex: `0x${string}` }
+> = {
+  8453: { name: "Base", short: "Base", hex: "0x2105" },
+  1: { name: "Ethereum", short: "Ethereum", hex: "0x1" },
+};
+
+function numericChainId(id: ChainIdString): SupportedChainId {
+  return id === "1" ? 1 : 8453;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +109,11 @@ function fmtCountdown(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** Truncate an address to `0x1234…cdef` for display. */
+function truncAddr(a?: string): string {
+  return a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : (a ?? "—");
+}
+
 /**
  * Obtain an ethers v6 signer from window.ethereum.
  * Returns null with an error message if no injected wallet is available.
@@ -85,7 +125,10 @@ async function getEthersSigner(): Promise<
   const ethereum = (window as unknown as { ethereum?: Eip1193Provider })
     .ethereum;
   if (!ethereum) {
-    return { error: "No Web3 wallet detected. Install MetaMask or another browser wallet." };
+    return {
+      error:
+        "No Web3 wallet detected. Install MetaMask or another browser wallet.",
+    };
   }
   try {
     const provider: BrowserProvider = new ethers.BrowserProvider(ethereum);
@@ -117,9 +160,7 @@ function Countdown({ expiresAt }: { expiresAt: string }) {
   if (secs <= 0)
     return <span className="text-danger font-semibold">Expired</span>;
   return (
-    <span
-      className={secs < 60 ? "text-warning font-semibold" : "text-muted"}
-    >
+    <span className={secs < 60 ? "text-warn font-semibold" : "text-muted"}>
       {fmtCountdown(secs)} remaining
     </span>
   );
@@ -141,9 +182,123 @@ export function TopupView(): React.ReactElement {
   const [settleResult, setSettleResult] = useState<SettleResult | null>(null);
   const [settleError, setSettleError] = useState<string | null>(null);
 
+  // Chain selector state
+  const [selectedChainId, setSelectedChainId] =
+    useState<SupportedChainId>(8453); // Base default (live deployment)
+  const [walletChainId, setWalletChainId] = useState<number | null>(null);
+  const [switching, setSwitching] = useState(false);
+
+  // Derived
+  const selectedChain = CHAINS[selectedChainId];
+  const chainMatched = walletChainId === selectedChainId;
+
   // Check if quote is expired
   const quoteExpired =
     quote !== null && secondsRemaining(quote.expiresAt) === 0;
+
+  // ---------------------------------------------------------------------------
+  // Wallet network detection — read chainId on mount + keep fresh on change
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    const eth = (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
+    if (!eth) return;
+    const requestable = eth as unknown as {
+      request: (a: { method: string }) => Promise<unknown>;
+    };
+    const read = async () => {
+      try {
+        const id = await requestable.request({ method: "eth_chainId" });
+        if (typeof id === "string") setWalletChainId(Number.parseInt(id, 16));
+      } catch {
+        // wallet not connected yet — leave null
+      }
+    };
+    void read();
+    const onChainChanged = (id: unknown) => {
+      if (typeof id === "string") setWalletChainId(Number.parseInt(id, 16));
+    };
+    const evented = eth as unknown as {
+      on?: (e: string, cb: (id: unknown) => void) => void;
+      removeListener?: (e: string, cb: (id: unknown) => void) => void;
+    };
+    evented.on?.("chainChanged", onChainChanged);
+    return () => {
+      evented.removeListener?.("chainChanged", onChainChanged);
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Chain selection — switching chain tears down any in-progress quote/settle
+  // ---------------------------------------------------------------------------
+
+  const handleChainChange = useCallback(
+    (next: ChainIdString) => {
+      const nextId = numericChainId(next);
+      if (nextId === selectedChainId) return;
+      setSelectedChainId(nextId);
+      // A quote is bound to one chain's domain/vault — reset the whole flow.
+      setQuote(null);
+      setQuoteError(null);
+      setSettleResult(null);
+      setSettleError(null);
+    },
+    [selectedChainId],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Wallet network switch (wallet_switchEthereumChain, add Base if missing)
+  // ---------------------------------------------------------------------------
+
+  const handleSwitchChain = useCallback(async () => {
+    const eth = (window as unknown as { ethereum?: Eip1193Provider })
+      .ethereum as
+      | {
+          request: (a: {
+            method: string;
+            params?: unknown[];
+          }) => Promise<unknown>;
+        }
+      | undefined;
+    if (!eth) return;
+    setSwitching(true);
+    try {
+      try {
+        await eth.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: selectedChain.hex }],
+        });
+      } catch (err) {
+        // 4902 = chain not added to the wallet. For Base, add it then retry.
+        const code = (err as { code?: number } | null)?.code;
+        if (code === 4902 && selectedChainId === 8453) {
+          await eth.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: CHAINS[8453].hex,
+                chainName: "Base",
+                nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+                rpcUrls: ["https://mainnet.base.org"],
+                blockExplorerUrls: ["https://basescan.org"],
+              },
+            ],
+          });
+          await eth.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: selectedChain.hex }],
+          });
+        } else {
+          throw err;
+        }
+      }
+      setWalletChainId(selectedChainId); // optimistic; chainChanged will also fire
+    } catch {
+      // user rejected, or switch/add failed — leave walletChainId unchanged
+    } finally {
+      setSwitching(false);
+    }
+  }, [selectedChain.hex, selectedChainId]);
 
   // ---------------------------------------------------------------------------
   // Get quote
@@ -165,7 +320,7 @@ export function TopupView(): React.ReactElement {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amountUsd: usdVal }),
+        body: JSON.stringify({ amountUsd: usdVal, chainId: selectedChainId }),
       });
       if (res.status === 401) {
         setQuoteError("Sign in before getting a top-up quote.");
@@ -191,14 +346,14 @@ export function TopupView(): React.ReactElement {
     } finally {
       setQuoting(false);
     }
-  }, [amountUsd]);
+  }, [amountUsd, selectedChainId]);
 
   // ---------------------------------------------------------------------------
   // Sign + settle
   // ---------------------------------------------------------------------------
 
   const handleSettle = useCallback(async () => {
-    if (!quote || quoteExpired) return;
+    if (!quote || quoteExpired || !chainMatched) return;
 
     setSettling(true);
     setSettleError(null);
@@ -273,7 +428,11 @@ export function TopupView(): React.ReactElement {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topupId: quote.topupId, signature: sig }),
+        body: JSON.stringify({
+          topupId: quote.topupId,
+          chainId: quote.chainId,
+          signature: sig,
+        }),
       });
 
       if (res.status === 402) {
@@ -311,7 +470,7 @@ export function TopupView(): React.ReactElement {
     } finally {
       setSettling(false);
     }
-  }, [quote, quoteExpired]);
+  }, [quote, quoteExpired, chainMatched]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -329,6 +488,148 @@ export function TopupView(): React.ReactElement {
           Deposit PTON credits via an EIP-3009 signed transfer. Your browser
           wallet must hold enough PTON on the configured network.
         </p>
+      </div>
+
+      {/* ── Chain selector ─────────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="text-xs-tight font-semibold uppercase tracking-[0.16em] text-muted/70">
+          Payment network
+        </div>
+
+        <SegmentedControl<ChainIdString>
+          value={String(selectedChainId) as ChainIdString}
+          onValueChange={handleChainChange}
+          aria-label="Select payment network"
+          items={[
+            { value: "1", label: "Ethereum", testId: "chain-ethereum" },
+            {
+              value: "8453",
+              label: "Base",
+              testId: "chain-base",
+              badge: (
+                <Badge
+                  variant="secondary"
+                  className="ml-1 h-4 rounded-full px-1.5 py-0 text-[10px] font-semibold text-ok"
+                >
+                  Live
+                </Badge>
+              ),
+            },
+          ]}
+        />
+
+        {/* Network-mismatch banner */}
+        {walletChainId !== null && !chainMatched ? (
+          <Banner
+            variant="warning"
+            className="rounded-xl"
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleSwitchChain()}
+                disabled={switching}
+                className="h-7 shrink-0 rounded-full px-3 text-2xs font-semibold"
+              >
+                {switching ? "Switching…" : `Switch to ${selectedChain.short}`}
+              </Button>
+            }
+          >
+            Your wallet is on{" "}
+            <span className="font-semibold">
+              {CHAINS[walletChainId as SupportedChainId]?.name ??
+                `chain ${walletChainId}`}
+            </span>
+            . Switch to{" "}
+            <span className="font-semibold">{selectedChain.name}</span> to top
+            up.
+          </Banner>
+        ) : null}
+
+        {/* Matched confirmation */}
+        {walletChainId !== null && chainMatched ? (
+          <div className="flex items-center gap-1.5 text-2xs text-ok">
+            <span
+              aria-hidden
+              className="inline-block h-1.5 w-1.5 rounded-full bg-ok"
+            />
+            Wallet connected on {selectedChain.name}.
+          </div>
+        ) : null}
+
+        {/* Selected-chain context panel */}
+        <PagePanel variant="inset" className="px-4 py-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs-tight font-semibold uppercase tracking-[0.16em] text-muted/70">
+              Network
+            </span>
+            <span className="text-xs tabular-nums text-txt">
+              {selectedChain.name}
+              <span className="text-muted">
+                {" "}
+                · chainId {quote?.chainId ?? selectedChainId}
+              </span>
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-2">
+            <span className="text-xs text-muted">PTON token</span>
+            <span className="flex items-center gap-1">
+              <span className="font-mono text-xs text-txt">
+                {truncAddr(quote?.ptonAddress)}
+              </span>
+              {quote?.ptonAddress ? (
+                <CopyButton
+                  value={quote.ptonAddress}
+                  copyLabel="Copy PTON token address"
+                />
+              ) : null}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted">Vault</span>
+            <span className="flex items-center gap-1">
+              <span className="font-mono text-xs text-txt">
+                {truncAddr(quote?.vaultAddress)}
+              </span>
+              {quote?.vaultAddress ? (
+                <CopyButton
+                  value={quote.vaultAddress}
+                  copyLabel="Copy vault address"
+                />
+              ) : null}
+            </span>
+          </div>
+        </PagePanel>
+
+        {/* Base: how to obtain PTON */}
+        {selectedChainId === 8453 ? (
+          <PagePanel variant="inset" className="px-4 py-3">
+            <div className="text-xs text-muted space-y-1">
+              <div className="font-semibold text-txt text-xs-tight">
+                Getting PTON on Base
+              </div>
+              <div>
+                Base has no canonical TON, so you mint and wrap it yourself
+                before topping up:
+              </div>
+              <div>
+                1. Call <code className="font-mono text-txt">TON.faucet()</code>{" "}
+                to mint test TON to your wallet.
+              </div>
+              <div>
+                2. Call{" "}
+                <code className="font-mono text-txt">PTON.deposit()</code> to
+                wrap your TON into PTON.
+              </div>
+              <div className="text-2xs text-muted/70 pt-0.5">
+                On Ethereum, canonical TON/PTON is already available — no faucet
+                needed.
+              </div>
+            </div>
+          </PagePanel>
+        ) : null}
       </div>
 
       {/* Success banner */}
@@ -433,16 +734,16 @@ export function TopupView(): React.ReactElement {
             Step 2 — Sign & settle
           </div>
           <p className="text-xs text-muted">
-            Clicking &ldquo;Top Up&rdquo; will open your browser wallet and
-            ask you to sign an EIP-3009 off-chain authorization. No gas is
-            required for signing — the server submits the on-chain transaction.
+            Clicking &ldquo;Top Up&rdquo; will open your browser wallet and ask
+            you to sign an EIP-3009 off-chain authorization. No gas is required
+            for signing — the server submits the on-chain transaction.
           </p>
 
           <Button
             variant="default"
             size="sm"
             onClick={() => void handleSettle()}
-            disabled={settling || !quote || quoteExpired}
+            disabled={settling || !quote || quoteExpired || !chainMatched}
             className="h-9 rounded-xl px-5 text-sm font-semibold"
           >
             {settling
@@ -451,7 +752,9 @@ export function TopupView(): React.ReactElement {
                 ? "Get a quote first"
                 : quoteExpired
                   ? "Quote expired — re-quote"
-                  : "Top Up"}
+                  : !chainMatched
+                    ? `Switch to ${selectedChain.short} to sign`
+                    : "Top Up"}
           </Button>
 
           {settleError ? (
@@ -459,7 +762,7 @@ export function TopupView(): React.ReactElement {
           ) : null}
 
           {quoteExpired && quote ? (
-            <div className="text-xs text-warning">
+            <div className="text-xs text-warn">
               Quote expired.{" "}
               <button
                 type="button"
@@ -483,8 +786,8 @@ export function TopupView(): React.ReactElement {
             How it works
           </div>
           <div>
-            1. The server computes how many PTON tokens equal your USD amount
-            at the current TWAP rate.
+            1. The server computes how many PTON tokens equal your USD amount at
+            the current TWAP rate.
           </div>
           <div>
             2. You sign an EIP-3009 <code>TransferWithAuthorization</code> typed

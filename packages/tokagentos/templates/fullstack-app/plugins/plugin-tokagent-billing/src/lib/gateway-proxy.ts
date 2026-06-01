@@ -144,6 +144,7 @@ export interface GatewayClient {
   // Credits
   creditsMe(headers: ForwardHeaders): Promise<ProxyResponse>;
   creditsRefresh(headers: ForwardHeaders): Promise<ProxyResponse>;
+  creditsBridge(headers: ForwardHeaders, body: unknown): Promise<ProxyResponse>;
 
   // Topup
   topupInfo(headers: ForwardHeaders): Promise<ProxyResponse>;
@@ -219,6 +220,7 @@ export interface GatewayProxy {
   credits: {
     me: (headers: ForwardHeaders) => Promise<ProxyResponse>;
     refresh: (headers: ForwardHeaders) => Promise<ProxyResponse>;
+    bridge: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
   };
   topup: {
     info: (headers: ForwardHeaders) => Promise<ProxyResponse>;
@@ -360,6 +362,8 @@ export function createGatewayClient(opts: GatewayProxyOptions): GatewayClient {
         pickForwardHeaders(headers),
         undefined,
       ),
+    creditsBridge: (headers, body) =>
+      request("POST", "/v1/credits/bridge", pickForwardHeaders(headers), body),
 
     topupInfo: (headers) =>
       request("GET", "/v1/topup/info", pickForwardHeaders(headers), undefined),
@@ -460,6 +464,7 @@ export function createGatewayProxy(opts: GatewayProxyOptions): GatewayProxy {
     credits: {
       me: (headers) => client.creditsMe(headers),
       refresh: (headers) => client.creditsRefresh(headers),
+      bridge: (headers, body) => client.creditsBridge(headers, body),
     },
     topup: {
       info: (headers) => client.topupInfo(headers),

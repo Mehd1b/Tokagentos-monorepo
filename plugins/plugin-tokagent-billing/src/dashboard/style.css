@@ -1925,3 +1925,52 @@ html[data-embed="1"] footer { display: none; }
   .x402-discover-form .btn { width: 100%; }
   .x402-config-actions .btn { flex: 1; }
 }
+
+/* ---- Global network switcher (topbar) ---- */
+.network-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+.network-switch-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.network-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  background: var(--bg-1);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 0 30px 0 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23c4f547' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.network-select:hover { border-color: var(--accent); }
+.network-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.network-select option { background: #14141b; color: var(--text); }
+
+/* ---- Swap card: Base/non-Ethereum bridge notice ---- */
+.swap-base-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 4px 4px;
+}
+.swap-base-notice p { margin: 0; }
+.swap-base-notice .btn { margin-top: 6px; }

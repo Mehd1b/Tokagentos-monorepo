@@ -23,6 +23,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Route, RouteRequest, RouteResponse, IAgentRuntime } from "@elizaos/core";
+import { BILLING_CHAIN_MAP } from "@tokagentos/billing";
 
 // ---------------------------------------------------------------------------
 // Asset resolution
@@ -88,6 +89,41 @@ function buildConfigJs(runtime: IAgentRuntime): string {
     42161: "https://arbiscan.io",
     10: "https://optimistic.etherscan.io",
   };
+  // PUBLIC RPC endpoints for wallet add/switch (wallet_addEthereumChain). We
+  // deliberately do NOT ship BILLING_CHAIN_RPC_URL here — that may carry the
+  // operator's private API key, which must never reach the browser.
+  const publicRpcs: Record<number, string> = {
+    1: "https://ethereum-rpc.publicnode.com",
+    11155111: "https://ethereum-sepolia-rpc.publicnode.com",
+    137: "https://polygon-rpc.com",
+    8453: "https://mainnet.base.org",
+    42161: "https://arb1.arbitrum.io/rpc",
+    10: "https://mainnet.optimism.io",
+  };
+
+  // Selectable deposit chains = billing-registry entries with a live PTON +
+  // vault (e.g. Ethereum 1 + Base 8453). The dashboard renders one chip per
+  // entry; signing/quote/settle all key off the chosen chainId.
+  const selectableChains = Array.from(BILLING_CHAIN_MAP.values())
+    .filter((c) => c.pton && c.claudeVault)
+    .map((c) => ({
+      id: c.chainId,
+      name: chainNames[c.chainId] ?? c.name ?? `chain-${c.chainId}`,
+      rpcUrl: publicRpcs[c.chainId] ?? "",
+      currency: "ETH",
+      explorer: explorers[c.chainId] ?? "",
+    }));
+  // Always include the configured chain even if it isn't a live registry entry
+  // (e.g. a local Anvil fork) so single-chain / local dev keeps working.
+  if (!selectableChains.some((c) => c.id === chainId)) {
+    selectableChains.unshift({
+      id: chainId,
+      name: chainNames[chainId] ?? `chain-${chainId}`,
+      rpcUrl: get("BILLING_CHAIN_RPC_URL") || publicRpcs[chainId] || "",
+      currency: "ETH",
+      explorer: explorers[chainId] ?? "",
+    });
+  }
 
   // In client-mode the dashboard talks to the upstream gateway DIRECTLY via
   // CORS rather than forwarding through the local agent. This sidesteps three
@@ -113,6 +149,10 @@ function buildConfigJs(runtime: IAgentRuntime): string {
     CHAIN_RPC_URL: get("BILLING_CHAIN_RPC_URL"),
     CHAIN_CURRENCY_SYMBOL: "ETH",
     CHAIN_EXPLORER_URL: explorers[chainId] ?? "",
+    // Multi-chain top-up: the dashboard renders a network switcher per entry and
+    // threads the chosen chainId through quote → sign → settle. CHAIN_ID stays
+    // the default selection.
+    CHAINS: selectableChains,
     PUBLIC_ORIGIN: "",
     APP_NAME: "Tokagent — Billing",
   };

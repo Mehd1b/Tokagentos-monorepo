@@ -23,6 +23,7 @@ export { loadBillingConfig, BillingConfigError, type BillingConfig } from './con
 // Phase 4: DB-backed ledger, auth, and pricing primitives
 export * from './ledger/schema.js';
 export * from './ledger/ledger.js';
+export * from './ledger/backing.js';
 export * from './ledger/preauth.js';
 export * from './ledger/retry.js';
 export * from './auth/api-keys.js';

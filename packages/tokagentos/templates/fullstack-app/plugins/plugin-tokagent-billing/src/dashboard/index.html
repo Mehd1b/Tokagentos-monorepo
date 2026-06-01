@@ -68,6 +68,10 @@
       </div>
     </div>
     <div class="topbar-right">
+      <label class="network-switch" id="network-switch" hidden>
+        <span class="network-switch-label">Network</span>
+        <select id="network-select" class="network-select" aria-label="Active network"></select>
+      </label>
       <span id="chain-pill" class="pill" hidden>
         <span class="dot" aria-hidden="true"></span>
         <span id="chain-name">—</span>
@@ -221,7 +225,7 @@
         </article>
 
         <!-- ---- Swap card (NEW) ---- -->
-        <article class="card">
+        <article class="card" id="swap-card">
           <header class="card-header">
             <div>
               <div class="card-eyebrow">Swap</div>
@@ -229,6 +233,32 @@
             </div>
             <span class="card-tag">Route via TON</span>
           </header>
+
+          <!-- Shown only when a non-Ethereum network is selected: swaps route
+               through TON's Ethereum liquidity, so they're Ethereum-only.
+               Instead we offer a credit-level bridge from Ethereum. -->
+          <div id="swap-base-notice" class="swap-base-notice" hidden>
+            <p class="muted small">
+              Token swaps route through TON's Ethereum liquidity, so
+              <strong>Swap is Ethereum-only</strong>.
+            </p>
+            <p class="muted xsmall">
+              Bridge spendable credits from Ethereum to
+              <span id="bridge-target-name">this network</span>.
+            </p>
+            <div class="estimate-line subtle">
+              <span class="est-label">Backed on <span id="bridge-target-name-2">network</span></span>
+              <span class="est-val"><span id="bridge-backing">—</span> PTON</span>
+            </div>
+            <div class="amount-input">
+              <input id="bridge-amount" type="number" step="0.1" min="0.1" placeholder="0.0" inputmode="decimal" />
+              <span class="amount-unit">PTON</span>
+            </div>
+            <button id="bridge-btn" class="btn btn-primary btn-block btn-cta" type="button">
+              Bridge from Ethereum
+            </button>
+            <p id="bridge-status" class="status-line" role="status" aria-live="polite"></p>
+          </div>
 
           <div class="form-row">
             <div class="field-label-row">

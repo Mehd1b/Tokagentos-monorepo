@@ -137,6 +137,42 @@ export type CreditStateRow = InferSelectModel<typeof creditState>;
 export type CreditStateInsert = InferInsertModel<typeof creditState>;
 
 // ---------------------------------------------------------------------------
+// Table 1b: billing_credit_backing  (per-chain attribution / "global spend,
+// per-network backing")
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-(wallet, chain) credit BACKING. `creditState.balance` remains the single
+ * GLOBAL spendable balance (untouched); this table only records WHICH chain a
+ * wallet's credits are attributed to, for per-network display and the
+ * credit-level bridge.
+ *
+ * `amount` increments on a deposit (settle) for the chain the deposit landed on,
+ * and moves between rows on `bridgeBacking`. It is a ledger-level attribution: a
+ * bridge reassigns backing WITHOUT moving on-chain PTON, so per-chain backing may
+ * diverge from each vault's on-chain `credits[wallet]`. Spending is global and
+ * unaffected; on-chain `withdraw` stays bounded by each vault's real PTON.
+ */
+export const creditBacking = pgTable(
+  "billing_credit_backing",
+  {
+    wallet: text("wallet").notNull(), // lowercased, 0x-prefixed
+    chainId: integer("chain_id").notNull(),
+    amount: numericBigint("amount").notNull().default(sql`'0'`),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [primaryKey({ columns: [table.wallet, table.chainId] })],
+);
+
+export type CreditBackingRow = InferSelectModel<typeof creditBacking>;
+export type CreditBackingInsert = InferInsertModel<typeof creditBacking>;
+
+// ---------------------------------------------------------------------------
 // Table 2: billing_reservations
 // ---------------------------------------------------------------------------
 

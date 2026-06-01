@@ -37,6 +37,7 @@ import {
   depositX402,
   usdToPton,
   topupQuotes,
+  creditBackingDeposit,
 } from "@tokagentos/billing";
 import { eq } from "drizzle-orm";
 import {
@@ -669,6 +670,16 @@ async function handleTopupSettle(
       txHash,
     });
     return;
+  }
+
+  // Attribute this deposit to the chain it landed on ("per-network backing").
+  // Non-fatal: the on-chain deposit + global credit already succeeded, so a
+  // backing-ledger hiccup must not turn a successful settle into an error.
+  try {
+    await creditBackingDeposit(db, identity.wallet, resolvedChainId, auth.value);
+  } catch (err) {
+    // Best-effort attribution only; logged, never surfaced to the caller.
+    void err;
   }
 
   res.status(200).json({ txHash, ok: true });

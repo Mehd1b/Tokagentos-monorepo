@@ -36,6 +36,39 @@ const CHAIN_RPC_URL = String(CONFIG.CHAIN_RPC_URL ?? "");
 const CHAIN_CURRENCY_SYMBOL = String(CONFIG.CHAIN_CURRENCY_SYMBOL ?? "ETH");
 const CHAIN_EXPLORER_URL = String(CONFIG.CHAIN_EXPLORER_URL ?? "");
 
+// ---- Multi-chain registry --------------------------------------------------
+// The gateway advertises the chains a user may deposit PTON on via
+// CONFIG.CHAINS (built server-side from the billing address registry). We fall
+// back to the legacy single-chain CONFIG.* fields so an older gateway that does
+// not inject CHAINS keeps working unchanged (one chain → selector stays hidden).
+const CHAINS = (Array.isArray(CONFIG.CHAINS) && CONFIG.CHAINS.length > 0
+  ? CONFIG.CHAINS
+  : [
+      {
+        id: CHAIN_ID,
+        name: CHAIN_NAME,
+        rpcUrl: CHAIN_RPC_URL,
+        currency: CHAIN_CURRENCY_SYMBOL,
+        explorer: CHAIN_EXPLORER_URL,
+      },
+    ]
+).map((c) => {
+  const id = Number(c.id) || 1;
+  return {
+    id,
+    idHex: `0x${id.toString(16)}`,
+    name: String(c.name ?? `chain-${id}`),
+    rpcUrl: String(c.rpcUrl ?? ""),
+    currency: String(c.currency ?? "ETH"),
+    explorer: String(c.explorer ?? ""),
+  };
+});
+
+/** Resolve a chain's metadata by id, defaulting to the first selectable chain. */
+function chainMeta(id) {
+  return CHAINS.find((c) => c.id === Number(id)) ?? CHAINS[0];
+}
+
 const SESSION_KEY = "ai-proxy-dashboard:session";
 const ATTO = 10n ** 18n;
 
@@ -103,6 +136,12 @@ const state = {
   callsCursor: null,
   callsLoaded: 0,
   activeTab: "overview",
+  /** Chain the user picked for top-up (e.g. 1 = Ethereum, 8453 = Base).
+   *  Defaults to the gateway's configured chain when it is selectable. */
+  selectedChainId: CHAINS.some((c) => c.id === CHAIN_ID) ? CHAIN_ID : CHAINS[0].id,
+  /** Per-chain { vault, pton } cache keyed by chainId — addresses differ per
+   *  chain, so a single shared `vault`/`pton` would cross-wire the deposit. */
+  targetsByChain: {},
 };
 
 // ----------------------------- DOM helpers -----------------------------
@@ -286,13 +325,14 @@ async function rpc(method, params = []) {
  *      wallet_addEthereumChain to register it; MetaMask typically auto-
  *      switches after add, but we call switch again to be defensive.
  */
-async function ensureChain() {
+async function ensureChain(meta = chainMeta(state.selectedChainId)) {
+  const wantHex = meta.idHex;
   const current = await rpc("eth_chainId");
-  if (typeof current === "string" && current.toLowerCase() === CHAIN_ID_HEX.toLowerCase()) {
+  if (typeof current === "string" && current.toLowerCase() === wantHex.toLowerCase()) {
     return current;
   }
   try {
-    await rpc("wallet_switchEthereumChain", [{ chainId: CHAIN_ID_HEX }]);
+    await rpc("wallet_switchEthereumChain", [{ chainId: wantHex }]);
   } catch (err) {
     // 4902 = chain unknown to wallet. Some wallets surface it as -32603 with
     // a nested code. Detect both before falling through to "add then switch".
@@ -306,19 +346,19 @@ async function ensureChain() {
     }
     // Build the EIP-3085 add payload. blockExplorerUrls is a sensitive field
     // — wallets reject the call if you pass an empty array, so omit it when
-    // the operator left CHAIN_EXPLORER_URL blank.
+    // the chain has no explorer configured.
     const addParams = {
-      chainId: CHAIN_ID_HEX,
-      chainName: CHAIN_NAME,
-      rpcUrls: [CHAIN_RPC_URL],
-      nativeCurrency: { name: CHAIN_CURRENCY_SYMBOL, symbol: CHAIN_CURRENCY_SYMBOL, decimals: 18 },
+      chainId: wantHex,
+      chainName: meta.name,
+      rpcUrls: [meta.rpcUrl],
+      nativeCurrency: { name: meta.currency, symbol: meta.currency, decimals: 18 },
     };
-    if (CHAIN_EXPLORER_URL) addParams.blockExplorerUrls = [CHAIN_EXPLORER_URL];
+    if (meta.explorer) addParams.blockExplorerUrls = [meta.explorer];
     await rpc("wallet_addEthereumChain", [addParams]);
     // MetaMask normally switches automatically after add; on some wallets it
     // doesn't, so re-issue the switch and ignore "already on" errors.
     try {
-      await rpc("wallet_switchEthereumChain", [{ chainId: CHAIN_ID_HEX }]);
+      await rpc("wallet_switchEthereumChain", [{ chainId: wantHex }]);
     } catch (err2) {
       if (err2?.code !== -32602) throw err2;
     }
@@ -334,15 +374,19 @@ async function refreshChainPill() {
   const nameEl = document.getElementById("chain-name");
   if (!pill || !idEl || !state.provider) return;
   try {
+    const meta = chainMeta(state.selectedChainId);
     const current = await state.provider.request({ method: "eth_chainId" });
-    const ok = typeof current === "string" && current.toLowerCase() === CHAIN_ID_HEX.toLowerCase();
+    const ok = typeof current === "string" && current.toLowerCase() === meta.idHex.toLowerCase();
     idEl.textContent = current ?? "—";
-    if (nameEl) nameEl.textContent = ok ? CHAIN_NAME : "wrong network";
+    if (nameEl) nameEl.textContent = ok ? meta.name : `switch to ${meta.name}`;
     pill.classList.toggle("pill-ok", ok);
     pill.classList.toggle("pill-warn", !ok);
     pill.hidden = false;
     const switchBtn = document.getElementById("switch-chain-btn");
-    if (switchBtn) switchBtn.hidden = ok;
+    if (switchBtn) {
+      switchBtn.hidden = ok;
+      switchBtn.textContent = ok ? "Switch network" : `Switch to ${meta.name}`;
+    }
   } catch (e) {
     console.warn("[dashboard] refreshChainPill failed", e);
   }
@@ -488,11 +532,19 @@ async function siweLogin() {
 // proxy could then reserve the probe's cost successfully and returned 200
 // instead of 402. /v1/topup/info is unconditional.
 async function resolveDepositTargets() {
-  if (state.vault && state.pton) return { vault: state.vault, pton: state.pton };
-  const info = await apiJson("/v1/topup/info");
-  state.vault = info.vault;
-  state.pton = info.asset;
-  return { vault: state.vault, pton: state.pton };
+  const chainId = state.selectedChainId;
+  const cached = state.targetsByChain[chainId];
+  if (cached && cached.vault && cached.pton) return cached;
+  // Ask the gateway for THIS chain's vault + PTON (the address pair differs per
+  // chain). The gateway resolves it from the billing registry; older gateways
+  // ignore the query and return their single configured chain.
+  const info = await apiJson(`/v1/topup/info?chainId=${chainId}`);
+  const targets = { vault: info.vault, pton: info.asset };
+  state.targetsByChain[chainId] = targets;
+  // Keep the legacy flat fields in sync for any other readers.
+  state.vault = targets.vault;
+  state.pton = targets.pton;
+  return targets;
 }
 
 // ----------------------------- Top up (EIP-3009) -----------------------------
@@ -527,7 +579,7 @@ async function signTopupAuth({ pton, vault, valueAtto, nonce, validAfter, validB
     domain: {
       name: "PTON",
       version: "1",
-      chainId: CHAIN_ID,
+      chainId: state.selectedChainId,
       verifyingContract: pton,
     },
     primaryType: "TransferWithAuthorization",
@@ -596,6 +648,11 @@ async function topUp(ptonFloat) {
   if (!Number.isFinite(ptonFloat) || ptonFloat <= 0) throw new Error("amount must be > 0");
   // Convert PTON -> atto-PTON in BigInt space so we don't lose precision.
   const valueAtto = BigInt(Math.round(ptonFloat * 1_000_000)) * (ATTO / 1_000_000n);
+  // Make sure the wallet is on the chosen chain BEFORE signing — the EIP-712
+  // domain is bound to selectedChainId, so signing on the wrong active network
+  // would either be rejected by the wallet or recover the wrong address.
+  await ensureChain();
+  await refreshChainPill();
   const { vault, pton } = await resolveDepositTargets();
 
   // Step 1 — issue a single-use topupId via the dedicated quote endpoint.
@@ -606,7 +663,7 @@ async function topUp(ptonFloat) {
   // returning 402).
   const quote = await apiJson("/v1/topup/quote", {
     method: "POST",
-    body: JSON.stringify({ amountPton: valueAtto.toString() }),
+    body: JSON.stringify({ amountPton: valueAtto.toString(), chainId: state.selectedChainId }),
   });
   const topupId = quote.topupId;
 
@@ -627,7 +684,7 @@ async function topUp(ptonFloat) {
   const payment = {
     x402Version: 1,
     scheme: "exact",
-    network: `chain-${CHAIN_ID}`,
+    network: `chain-${state.selectedChainId}`,
     payload: {
       signature: { v: sig.v, r: sig.r, s: sig.s },
       authorization: {
@@ -645,7 +702,11 @@ async function topUp(ptonFloat) {
 
   const settled = await api("/v1/topup/settle", {
     method: "POST",
-    headers: { "x-payment": xPayment },
+    // The chainId in the JSON body is the authoritative settlement-chain signal
+    // (the gateway prefers it over the X-PAYMENT `network` field). The bytes the
+    // wallet signed already bind chainId via the EIP-712 domain.
+    headers: { "x-payment": xPayment, "content-type": "application/json" },
+    body: JSON.stringify({ chainId: state.selectedChainId }),
   });
   const settledBody = await settled.json().catch(() => null);
   if (!settled.ok) {
@@ -931,11 +992,13 @@ async function swapToPton({ inputToken, inputAmountFloat, slippageBps }) {
   if (!state.provider || !state.wallet) {
     throw new Error("Connect a wallet first.");
   }
-  if (CHAIN_ID !== 1) {
-    throw new Error(`Swap is only supported on Ethereum mainnet (chainId=1); current=${CHAIN_ID}.`);
+  // Swap is Ethereum-mainnet-only (the DEX route + WTON wrap live on chain 1),
+  // independent of which chain the user picked for a plain top-up.
+  if (!CHAINS.some((c) => c.id === 1)) {
+    throw new Error("Swap is only supported on Ethereum mainnet (chainId=1).");
   }
   const user = await activeAccountOrThrow();
-  await ensureChain();
+  await ensureChain(chainMeta(1));
 
   const cfg = SWAP_ADDRESSES[inputToken];
   const amountIn = parseUnits(inputAmountFloat, cfg.decimals);
@@ -1118,7 +1181,9 @@ async function loadPrice() {
 }
 
 async function loadCredits() {
-  state.credits = await apiJson("/v1/credits/me");
+  // Per-network spendable credits: pass the selected chain. Backends that are
+  // not yet chain-aware ignore the query and return the single-chain balance.
+  state.credits = await apiJson(`/v1/credits/me?chainId=${state.selectedChainId}`);
 }
 
 // Read the connected wallet's native ETH balance and PTON token balance via
@@ -1141,7 +1206,9 @@ async function loadWalletHoldings() {
     console.warn("eth_getBalance failed", e);
   }
   try {
-    if (!state.pton) await resolveDepositTargets();
+    // Always resolve for the CURRENTLY-SELECTED chain (cached per chainId) so a
+    // network switch reads PTON on the right chain instead of a stale address.
+    await resolveDepositTargets();
     // balanceOf(address) selector + 32-byte left-padded address
     const padded = state.wallet.toLowerCase().replace(/^0x/, "").padStart(64, "0");
     const data = "0x70a08231" + padded;
@@ -1159,7 +1226,7 @@ async function loadWalletHoldings() {
   // button works and the balance hint isn't perpetually "— USDC". These calls
   // are mainnet-only (the token addresses are mainnet constants); on any
   // other chain we silently leave the entries undefined so the UI shows "—".
-  if (CHAIN_ID === 1) {
+  if (state.selectedChainId === 1) {
     for (const sym of ["USDC", "USDT", "WBTC"]) {
       const cfg = SWAP_ADDRESSES[sym];
       try {
@@ -1213,7 +1280,7 @@ function renderTopBar() {
   if (state.session?.wallet) {
     addr.textContent = fmtAddr(state.session.wallet);
     pill.hidden = false;
-    chainId.textContent = CHAIN_ID;
+    chainId.textContent = "0x" + Number(state.selectedChainId).toString(16);
     chain.hidden = false;
     logout.hidden = false;
   } else {
@@ -1221,6 +1288,8 @@ function renderTopBar() {
     chain.hidden = true;
     logout.hidden = true;
   }
+  // Keep the global network switcher in sync (visible regardless of login).
+  renderNetworkSwitcher();
 }
 
 function renderKpis() {
@@ -1252,6 +1321,8 @@ function renderKpis() {
 
   // Sync swap card balance hint whenever wallet balances refresh.
   renderSwapPreview();
+  // Refresh the per-network backing shown in the bridge panel.
+  renderBridge();
 }
 
 function renderUsageOverview() {
@@ -1597,6 +1668,130 @@ function wireTopupPresets() {
     });
   }
   $("#topup-amount").addEventListener("input", updateTopupUsd);
+}
+
+// Global network switcher (topbar). Populates the <select> from CONFIG.CHAINS
+// and stays hidden when the gateway advertises a single chain (legacy mode).
+function renderNetworkSwitcher() {
+  const sel = document.getElementById("network-select");
+  const wrap = document.getElementById("network-switch");
+  if (!sel) return;
+  if (CHAINS.length <= 1) {
+    if (wrap) wrap.hidden = true;
+    return;
+  }
+  if (wrap) wrap.hidden = false;
+  // Build options once; afterwards just keep the selection in sync.
+  if (sel.options.length !== CHAINS.length) {
+    sel.innerHTML = "";
+    for (const c of CHAINS) {
+      const opt = document.createElement("option");
+      opt.value = String(c.id);
+      opt.textContent = c.name;
+      sel.appendChild(opt);
+    }
+  }
+  sel.value = String(state.selectedChainId);
+}
+
+// Swap routes through TON's Ethereum liquidity (no DEX pool for the Base PTON),
+// so the Swap card is Ethereum-only. On any other network, collapse the card to
+// a "bridge from Ethereum" notice.
+function updateSwapForChain() {
+  const card = document.getElementById("swap-card");
+  if (!card) return;
+  const onEth = state.selectedChainId === 1;
+  for (const child of card.children) {
+    if (child.classList.contains("card-header")) continue;
+    if (child.id === "swap-base-notice") {
+      child.hidden = onEth;
+      continue;
+    }
+    child.hidden = !onEth;
+  }
+  const tag = card.querySelector(".card-tag");
+  if (tag) tag.textContent = onEth ? "Route via TON" : "Ethereum only";
+  renderBridge();
+}
+
+// Update the Base bridge panel: target network name + per-network backing.
+function renderBridge() {
+  const meta = chainMeta(state.selectedChainId);
+  const n1 = document.getElementById("bridge-target-name");
+  const n2 = document.getElementById("bridge-target-name-2");
+  if (n1) n1.textContent = meta.name;
+  if (n2) n2.textContent = meta.name;
+  const b = document.getElementById("bridge-backing");
+  if (b) {
+    const backing = state.credits?.backing;
+    b.textContent = backing != null && backing !== "" ? fmtPton(BigInt(backing)) : "—";
+  }
+}
+
+// Credit-level bridge: move spendable backing from Ethereum (1) to the selected
+// network via POST /v1/credits/bridge. Ledger-only — no on-chain token move.
+function wireBridge() {
+  const btn = document.getElementById("bridge-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const status = document.getElementById("bridge-status");
+    const amtEl = document.getElementById("bridge-amount");
+    const v = parseFloat(amtEl ? amtEl.value : "");
+    if (!Number.isFinite(v) || v <= 0) {
+      setStatus(status, "Amount must be > 0", "err");
+      return;
+    }
+    if (state.selectedChainId === 1) {
+      setStatus(status, "Select a non-Ethereum network to bridge into.", "err");
+      return;
+    }
+    const amountAtto = BigInt(Math.round(v * 1_000_000)) * (ATTO / 1_000_000n);
+    btn.disabled = true;
+    setStatus(status, "Bridging credits from Ethereum…");
+    try {
+      await apiJson("/v1/credits/bridge", {
+        method: "POST",
+        body: JSON.stringify({
+          fromChainId: 1,
+          toChainId: state.selectedChainId,
+          amount: amountAtto.toString(),
+        }),
+      });
+      setStatus(status, `Bridged ${v} PTON of credits to ${chainMeta(state.selectedChainId).name}.`, "ok");
+      if (amtEl) amtEl.value = "";
+      await refreshAll();
+    } catch (e) {
+      setStatus(status, `Bridge failed: ${e.message}`, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+function wireNetworkSwitcher() {
+  const sel = document.getElementById("network-select");
+  if (!sel) return;
+  sel.addEventListener("change", async () => {
+    const id = Number(sel.value);
+    if (!id || id === state.selectedChainId) return;
+    state.selectedChainId = id;
+    renderNetworkSwitcher();
+    updateSwapForChain();
+    setStatus($("#topup-status"), "");
+    updateTopupUsd();
+    // Switching the network re-scopes ALL network-specific data: deposit
+    // targets (vault/PTON), wallet PTON/ETH, and spendable credits. Prompt the
+    // wallet to switch chains, then refresh every chain-dependent view.
+    try {
+      if (state.provider) await ensureChain();
+    } catch (e) {
+      console.warn("[dashboard] network switch (wallet) failed", e);
+    }
+    await refreshChainPill();
+    if (state.session) {
+      await refreshAll();
+    }
+  });
 }
 
 function updateTopupUsd() {
@@ -2389,6 +2584,10 @@ async function boot() {
   setupEmbedMode();
   wireTabs();
   wireTopupPresets();
+  wireNetworkSwitcher();
+  renderNetworkSwitcher();
+  wireBridge();
+  updateSwapForChain();
   wireKeyCreate();
   wireFaucet();
   wireTopup();

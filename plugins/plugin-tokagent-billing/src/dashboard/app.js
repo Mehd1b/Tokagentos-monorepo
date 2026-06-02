@@ -1491,11 +1491,11 @@ async function renderKeysTable() {
   try {
     keys = (await loadKeys()).keys;
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">Could not load keys: ${escape(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">Could not load keys: ${escape(e.message)}</td></tr>`;
     return;
   }
   if (keys.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty">No keys yet — mint one above to start using Claude Code with this wallet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">No keys yet — mint one above to start using Claude Code with this wallet.</td></tr>`;
     return;
   }
   for (const k of keys) {
@@ -1511,6 +1511,7 @@ async function renderKeysTable() {
     tr.innerHTML = `
       <td><code>${escape(k.id)}</code></td>
       <td>${escape(k.name ?? "—")}</td>
+      <td>${escape(chainMeta(k.chainId ?? 1).name)}</td>
       <td>${fmtTimestamp(k.createdAt)}</td>
       <td>${k.lastUsedAt ? fmtTimestamp(k.lastUsedAt) : "—"}</td>
       <td>${status}</td>

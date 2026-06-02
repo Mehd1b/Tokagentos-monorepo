@@ -1350,22 +1350,18 @@ function renderKpis() {
   const balance = c?.ledger?.balance ?? c?.balance ?? c?.onChainCredits;
   const reserved = c?.ledger?.reserved ?? c?.reserved ?? 0n;
   const accrued = c?.ledger?.accrued ?? c?.accrued ?? 0n;
-  // "Spendable balance" is the GLOBAL ledger balance. Spending on inference is
-  // chain-agnostic in the "global spend, per-network backing" model (see
-  // packages/billing/src/ledger/backing.ts) — the spendable total is the SAME
-  // regardless of the selected network. The per-network on-chain vault credits
-  // (state.onchainCredits) are shown SEPARATELY as the amount backed /
-  // withdrawable on the SELECTED chain, and that figure updates on network
-  // switch. (Prior versions wrongly put the per-chain on-chain credits in the
-  // headline, so e.g. Ethereum showed 1.99 instead of the real 4.24 spendable.)
-  const spendable = balance != null ? balance : state.onchainCredits;
+  // "Spendable balance" is shown PER NETWORK: the live on-chain vault credits for
+  // the SELECTED chain (read from that chain's vault, refreshed on every network
+  // switch), falling back to the gateway's global ledger balance only when the
+  // on-chain read is unavailable. Product decision: the headline reflects the
+  // CURRENT network. (Inference spend itself is global in the backend —
+  // "global spend, per-network backing" — so this figure is the amount backed on
+  // the current chain, which is also what's withdrawable there.)
+  const spendable = state.onchainCredits != null ? state.onchainCredits : balance;
   $("#kpi-balance").textContent = fmtPton(spendable);
   $("#kpi-reserved").textContent = fmtPton(reserved);
   $("#kpi-accrued").textContent = fmtPton(accrued);
   $("#kpi-balance-usd").textContent = fmtUsdFromAttoPton(spendable, state.tonUsd);
-  // Per-network on-chain vault credits (backed / withdrawable on this chain).
-  const onchainEl = document.getElementById("kpi-onchain");
-  if (onchainEl) onchainEl.textContent = state.onchainCredits != null ? fmtPton(state.onchainCredits) : "—";
   const heroNet = document.getElementById("hero-network");
   if (heroNet) heroNet.textContent = chainMeta(state.selectedChainId).name;
   // Wallet holdings (outside the vault). ETH and PTON share 18 decimals so

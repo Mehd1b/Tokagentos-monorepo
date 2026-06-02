@@ -474,6 +474,16 @@ main {
   font-weight: 600;
   margin-bottom: 14px;
 }
+.hero-eyebrow-net {
+  font-weight: 400;
+  opacity: 0.65;
+}
+.stat-hint {
+  font-weight: 400;
+  opacity: 0.6;
+  text-transform: none;
+  letter-spacing: 0;
+}
 .hero-balance {
   display: flex;
   align-items: baseline;

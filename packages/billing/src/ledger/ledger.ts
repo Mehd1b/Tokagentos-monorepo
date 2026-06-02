@@ -52,11 +52,12 @@ export type ReserveResult = ReserveSuccess | ReserveFailure;
 async function getOrCreateState(
   tx: BillingDatabase,
   wallet: string,
+  chainId: number,
 ): Promise<{ balance: bigint; reserved: bigint; accrued: bigint; firstAccrualAt: Date | null }> {
   const rows = await tx
     .select()
     .from(creditState)
-    .where(eq(creditState.wallet, wallet));
+    .where(and(eq(creditState.wallet, wallet), eq(creditState.chainId, chainId)));
 
   if (rows.length > 0) {
     const r = rows[0]!;
@@ -68,9 +69,10 @@ async function getOrCreateState(
     };
   }
 
-  // Row doesn't exist — insert zero state.
+  // Row doesn't exist — insert zero state for this (wallet, chain).
   await tx.insert(creditState).values({
     wallet,
+    chainId,
     balance: 0n,
     reserved: 0n,
     accrued: 0n,
@@ -98,12 +100,13 @@ async function getOrCreateState(
  */
 export async function reserve(
   db: BillingDatabase,
-  args: { wallet: Address; amount: bigint; requestId: string },
+  args: { wallet: Address; chainId: number; amount: bigint; requestId: string },
 ): Promise<ReserveResult> {
   const wallet = args.wallet.toLowerCase();
+  const { chainId } = args;
 
   return withSerializableRetry(db, async (tx) => {
-    const state = await getOrCreateState(tx, wallet);
+    const state = await getOrCreateState(tx, wallet, chainId);
 
     if (state.balance < args.amount) {
       return { ok: false as const, available: state.balance };
@@ -119,12 +122,13 @@ export async function reserve(
         reserved: newReserved,
         updatedAt: new Date(),
       })
-      .where(eq(creditState.wallet, wallet));
+      .where(and(eq(creditState.wallet, wallet), eq(creditState.chainId, chainId)));
 
     const inserted = await tx
       .insert(reservations)
       .values({
         wallet,
+        chainId,
         amountPton: args.amount,
         requestId: args.requestId,
         createdAt: new Date(),
@@ -177,10 +181,11 @@ export async function release(
 
     const reservation = rows[0]!;
     const wallet = reservation.wallet;
+    const chainId = reservation.chainId;
     const amount = reservation.amountPton;
 
-    // Restore balance, decrement reserved
-    const state = await getOrCreateState(tx, wallet);
+    // Restore balance, decrement reserved — on the reservation's own chain.
+    const state = await getOrCreateState(tx, wallet, chainId);
     await tx
       .update(creditState)
       .set({
@@ -188,7 +193,7 @@ export async function release(
         reserved: state.reserved - amount,
         updatedAt: new Date(),
       })
-      .where(eq(creditState.wallet, wallet));
+      .where(and(eq(creditState.wallet, wallet), eq(creditState.chainId, chainId)));
 
     // Mark reservation as released
     await tx
@@ -233,9 +238,10 @@ export async function commit(
 
     const reservation = rows[0]!;
     const wallet = reservation.wallet;
+    const chainId = reservation.chainId;
     const reservedAmount = reservation.amountPton;
 
-    const state = await getOrCreateState(tx, wallet);
+    const state = await getOrCreateState(tx, wallet, chainId);
 
     // Any excess reservation beyond the actual cost is refunded to balance.
     // Capping is silent (does not throw) so a single bad cost estimate
@@ -274,7 +280,7 @@ export async function commit(
         firstAccrualAt,
         updatedAt: now,
       })
-      .where(eq(creditState.wallet, wallet));
+      .where(and(eq(creditState.wallet, wallet), eq(creditState.chainId, chainId)));
 
     await tx
       .update(reservations)
@@ -293,12 +299,13 @@ export async function commit(
 export async function hydrate(
   db: BillingDatabase,
   wallet: Address,
+  chainId: number,
   onChainCredits: bigint,
 ): Promise<void> {
   const walletKey = wallet.toLowerCase();
 
   await withSerializableRetry(db, async (tx) => {
-    const state = await getOrCreateState(tx, walletKey);
+    const state = await getOrCreateState(tx, walletKey, chainId);
 
     const localCommitted = state.reserved + state.accrued;
     let newBalance: bigint;
@@ -324,7 +331,7 @@ export async function hydrate(
         lastHydratedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(creditState.wallet, walletKey));
+      .where(and(eq(creditState.wallet, walletKey), eq(creditState.chainId, chainId)));
   });
 }
 
@@ -341,11 +348,12 @@ export async function hydrate(
 export async function flushAccrued(
   db: BillingDatabase,
   wallet: Address,
+  chainId: number,
 ): Promise<{ amount: bigint; firstAccrualAt: Date | null } | null> {
   const walletKey = wallet.toLowerCase();
 
   return withSerializableRetry(db, async (tx) => {
-    const state = await getOrCreateState(tx, walletKey);
+    const state = await getOrCreateState(tx, walletKey, chainId);
 
     if (state.accrued === 0n) return null;
 
@@ -359,7 +367,7 @@ export async function flushAccrued(
         firstAccrualAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(creditState.wallet, walletKey));
+      .where(and(eq(creditState.wallet, walletKey), eq(creditState.chainId, chainId)));
 
     return { amount, firstAccrualAt };
   });

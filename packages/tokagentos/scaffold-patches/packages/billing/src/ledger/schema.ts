@@ -111,27 +111,37 @@ export const callLogStatusEnum = pgEnum("billing_call_log_status", [
 // Table 1: billing_credit_state
 // ---------------------------------------------------------------------------
 
-export const creditState = pgTable("billing_credit_state", {
-  wallet: text("wallet").primaryKey(), // lowercased, 0x-prefixed
-  // SQL defaults avoid BigInt serialization issues with drizzle-kit
-  balance: numericBigint("balance").notNull().default(sql`'0'`),
-  reserved: numericBigint("reserved").notNull().default(sql`'0'`),
-  accrued: numericBigint("accrued").notNull().default(sql`'0'`),
-  firstAccrualAt: timestamp("first_accrual_at", {
-    withTimezone: true,
-    mode: "date",
-  }),
-  lastHydratedAt: timestamp("last_hydrated_at", {
-    withTimezone: true,
-    mode: "date",
-  }),
-  updatedAt: timestamp("updated_at", {
-    withTimezone: true,
-    mode: "date",
-  })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
+export const creditState = pgTable(
+  "billing_credit_state",
+  {
+    wallet: text("wallet").notNull(), // lowercased, 0x-prefixed
+    // Per-chain credit state: each (wallet, chainId) has its own spendable
+    // balance/reserved/accrued. Spending on a network draws from THAT network's
+    // balance and settles on-chain against THAT network's vault.
+    // default(1) backfills pre-migration rows to Ethereum; runtime inserts
+    // always pass chainId explicitly.
+    chainId: integer("chain_id").notNull().default(1),
+    // SQL defaults avoid BigInt serialization issues with drizzle-kit
+    balance: numericBigint("balance").notNull().default(sql`'0'`),
+    reserved: numericBigint("reserved").notNull().default(sql`'0'`),
+    accrued: numericBigint("accrued").notNull().default(sql`'0'`),
+    firstAccrualAt: timestamp("first_accrual_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastHydratedAt: timestamp("last_hydrated_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [primaryKey({ columns: [table.wallet, table.chainId] })],
+);
 
 export type CreditStateRow = InferSelectModel<typeof creditState>;
 export type CreditStateInsert = InferInsertModel<typeof creditState>;
@@ -178,9 +188,12 @@ export type CreditBackingInsert = InferInsertModel<typeof creditBacking>;
 
 export const reservations = pgTable("billing_reservations", {
   id: uuid("id").primaryKey().defaultRandom(),
-  wallet: text("wallet")
-    .notNull()
-    .references(() => creditState.wallet),
+  // NB: no FK to creditState — creditState's PK is now composite (wallet,
+  // chainId) and `reserve` always getOrCreateState()s the (wallet, chainId) row
+  // before inserting here, so referential integrity is enforced in code.
+  // release/commit recover the chain from `chainId` on this row.
+  wallet: text("wallet").notNull(),
+  chainId: integer("chain_id").notNull().default(1),
   amountPton: numericBigint("amount_pton").notNull(),
   requestId: text("request_id").notNull(),
   createdAt: timestamp("created_at", {
@@ -208,6 +221,11 @@ export const consumeBatches = pgTable("billing_consume_batches", {
   // portability; bytea would require hex encoding on every comparison.
   batchId: text("batch_id").primaryKey(),
   wallet: text("wallet").notNull(),
+  // The chain this batch settles on — consumeCredits is submitted to THIS
+  // chain's vault. Folded into the batchId preimage so per-chain batches for
+  // the same wallet/amount/timestamp never collide. default(1) backfills
+  // pre-migration rows; runtime inserts always pass chainId.
+  chainId: integer("chain_id").notNull().default(1),
   amountPton: numericBigint("amount_pton").notNull(),
   state: consumeBatchStateEnum("state").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
@@ -301,6 +319,10 @@ export const apiKeys = pgTable(
   {
     id: text("id").primaryKey(), // sk-ai-{32 random hex chars}
     wallet: text("wallet").notNull(),
+    // The chain this key bills/settles on. Captured at mint from the network
+    // selected in the dashboard. Defaults to 1 (Ethereum) for backward-compat
+    // with keys minted before per-chain billing.
+    chainId: integer("chain_id").notNull().default(1),
     name: text("name").notNull(),
     hash: text("hash").notNull(), // hex-encoded HMAC-SHA256
     createdAt: timestamp("created_at", {
@@ -370,6 +392,9 @@ export const callLog = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     wallet: text("wallet").notNull(),
     apiKeyId: text("api_key_id"),
+    // Chain the call was billed on (per-chain usage reporting). Nullable for
+    // rows written before per-chain billing.
+    chainId: integer("chain_id"),
     ts: timestamp("ts", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

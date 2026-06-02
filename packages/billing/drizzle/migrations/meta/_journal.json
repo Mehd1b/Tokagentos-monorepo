@@ -29,6 +29,13 @@
       "when": 1780321368418,
       "tag": "0003_legal_logan",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780401865904,
+      "tag": "0004_lethal_scarecrow",
+      "breakpoints": true
     }
   ]
 }

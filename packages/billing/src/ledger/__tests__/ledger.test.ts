@@ -19,6 +19,7 @@ import {
 import type { Address } from "viem";
 
 const WALLET = "0xaaaa000000000000000000000000000000000001" as Address;
+const CHAIN = 1;
 
 let handle: TestDbHandle;
 
@@ -37,6 +38,7 @@ beforeEach(async () => {
   // Seed a fresh balance of 1000n
   await handle.db.insert(creditState).values({
     wallet: WALLET.toLowerCase(),
+    chainId: CHAIN,
     balance: 1000n,
     reserved: 0n,
     accrued: 0n,
@@ -57,6 +59,7 @@ describe("reserve()", () => {
   it("succeeds when balance is sufficient", async () => {
     const result = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 100n,
       requestId: "req-1",
     });
@@ -78,6 +81,7 @@ describe("reserve()", () => {
   it("fails when balance is insufficient", async () => {
     const result = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 9999n, // more than 1000n balance
       requestId: "req-2",
     });
@@ -98,6 +102,7 @@ describe("reserve()", () => {
   it("fails exactly at balance boundary (amount === balance + 1)", async () => {
     const result = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 1001n,
       requestId: "req-3",
     });
@@ -107,6 +112,7 @@ describe("reserve()", () => {
   it("succeeds at exact balance (amount === balance)", async () => {
     const result = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 1000n,
       requestId: "req-4",
     });
@@ -124,6 +130,7 @@ describe("commit()", () => {
   it("decrements reserved and increments accrued", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 200n,
       requestId: "req-c1",
     });
@@ -146,6 +153,7 @@ describe("commit()", () => {
   it("caps charge at reservation amount when totalPton > reserved", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 100n,
       requestId: "req-c2",
     });
@@ -166,6 +174,7 @@ describe("commit()", () => {
   it("throws if reservation already committed", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 50n,
       requestId: "req-c3",
     });
@@ -188,6 +197,7 @@ describe("release()", () => {
   it("restores balance after released_complete", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 300n,
       requestId: "req-r1",
     });
@@ -207,6 +217,7 @@ describe("release()", () => {
   it("restores balance after released_abort", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 400n,
       requestId: "req-r2",
     });
@@ -225,6 +236,7 @@ describe("release()", () => {
   it("throws if reservation already released", async () => {
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 50n,
       requestId: "req-r3",
     });
@@ -244,7 +256,7 @@ describe("release()", () => {
 
 describe("hydrate()", () => {
   it("sets balance from on-chain reading (initial hydration)", async () => {
-    await hydrate(handle.db, WALLET, 5000n);
+    await hydrate(handle.db, WALLET, CHAIN, 5000n);
 
     const rows = await handle.db
       .select()
@@ -259,6 +271,7 @@ describe("hydrate()", () => {
     // Reserve 100 first
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 100n,
       requestId: "req-h1",
     });
@@ -266,7 +279,7 @@ describe("hydrate()", () => {
 
     // On-chain says 1000 total; local reserved=100 accrued=0
     // expected balance = 1000 - 100 - 0 = 900
-    await hydrate(handle.db, WALLET, 1000n);
+    await hydrate(handle.db, WALLET, CHAIN, 1000n);
 
     const rows = await handle.db
       .select()
@@ -279,6 +292,7 @@ describe("hydrate()", () => {
     // Reserve 800 — so reserved=800, balance=200
     const r = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 800n,
       requestId: "req-h2",
     });
@@ -286,7 +300,7 @@ describe("hydrate()", () => {
 
     // On-chain now shows only 500 (user withdrew externally)
     // localCommitted = 800, onChain = 500 → balance clamped to 0
-    await hydrate(handle.db, WALLET, 500n);
+    await hydrate(handle.db, WALLET, CHAIN, 500n);
 
     const rows = await handle.db
       .select()
@@ -302,7 +316,7 @@ describe("hydrate()", () => {
 
 describe("flushAccrued()", () => {
   it("returns null when accrued is zero", async () => {
-    const result = await flushAccrued(handle.db, WALLET);
+    const result = await flushAccrued(handle.db, WALLET, CHAIN);
     expect(result).toBeNull();
   });
 
@@ -310,6 +324,7 @@ describe("flushAccrued()", () => {
     // Build up some accrual via reserve+commit
     const r1 = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 300n,
       requestId: "req-f1",
     });
@@ -319,6 +334,7 @@ describe("flushAccrued()", () => {
 
     const r2 = await reserve(handle.db, {
       wallet: WALLET,
+      chainId: CHAIN,
       amount: 200n,
       requestId: "req-f2",
     });
@@ -327,13 +343,13 @@ describe("flushAccrued()", () => {
     await commit(handle.db, r2.reservationId, 150n);
 
     // Total accrued = 300 + 150 = 450
-    const flushed = await flushAccrued(handle.db, WALLET);
+    const flushed = await flushAccrued(handle.db, WALLET, CHAIN);
     expect(flushed).not.toBeNull();
     expect(flushed!.amount).toBe(450n);
     expect(flushed!.firstAccrualAt).toBeInstanceOf(Date);
 
     // Second flush: accrued is now 0
-    const second = await flushAccrued(handle.db, WALLET);
+    const second = await flushAccrued(handle.db, WALLET, CHAIN);
     expect(second).toBeNull();
 
     // DB state: accrued = 0n, firstAccrualAt = null

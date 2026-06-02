@@ -161,6 +161,13 @@ export interface WrapModelDeps {
   db: BillingDatabase;
   marginBps: number;
   tonUsdGetter: () => number | null;
+  /**
+   * Chain to bill the operator wallet on. Seeded from `config.chainId`
+   * (BILLING_CHAIN_ID, default 1) at wrap-construction time. Internal
+   * useModel calls have no API key, so there is no per-request chain — the
+   * operator's configured chain is used for every billed model call.
+   */
+  chainId: number;
 }
 
 /**
@@ -230,6 +237,7 @@ export function wrapRuntimeUseModel(
 
     const reservation = await reserve(deps.db, {
       wallet,
+      chainId: deps.chainId,
       amount: maxCostPton,
       requestId,
     }).catch((err: unknown) => {
@@ -283,6 +291,7 @@ export function wrapRuntimeUseModel(
       await commitReservation(deps.db, reservation.reservationId, charge.totalPton);
       await deps.db.insert(callLog).values({
         wallet,
+        chainId: deps.chainId,
         apiKeyId: null,
         model: modelId,
         inputTokens,

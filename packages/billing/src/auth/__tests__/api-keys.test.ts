@@ -32,6 +32,7 @@ describe("mintApiKey()", () => {
       wallet: WALLET,
       name: "my-key",
       authSecret: SECRET,
+      chainId: 1,
     });
     expect(result.plaintext).toMatch(/^sk-ai-[0-9a-f]{64}$/);
     expect(result.id).toMatch(/^sk-ai-[0-9a-f]{8}$/);
@@ -42,11 +43,13 @@ describe("mintApiKey()", () => {
       wallet: WALLET,
       name: "key-a",
       authSecret: SECRET,
+      chainId: 1,
     });
     const b = await mintApiKey(handle.db, {
       wallet: WALLET,
       name: "key-b",
       authSecret: SECRET,
+      chainId: 1,
     });
     expect(a.plaintext).not.toBe(b.plaintext);
     expect(a.id).not.toBe(b.id);
@@ -59,11 +62,26 @@ describe("resolveApiKey()", () => {
       wallet: WALLET,
       name: "resolve-test",
       authSecret: SECRET,
+      chainId: 1,
     });
 
     const identity = await resolveApiKey(handle.db, plaintext, SECRET);
     expect(identity).not.toBeNull();
     expect(identity!.wallet.toLowerCase()).toBe(WALLET.toLowerCase());
+    expect(identity!.chainId).toBe(1);
+  });
+
+  it("round-trips the minted chainId (per-chain key)", async () => {
+    const { plaintext } = await mintApiKey(handle.db, {
+      wallet: WALLET,
+      name: "base-chain-key",
+      authSecret: SECRET,
+      chainId: 8453, // Base — a non-default chain
+    });
+
+    const identity = await resolveApiKey(handle.db, plaintext, SECRET);
+    expect(identity).not.toBeNull();
+    expect(identity!.chainId).toBe(8453);
   });
 
   it("returns null for unknown key", async () => {
@@ -85,6 +103,7 @@ describe("resolveApiKey()", () => {
       wallet: WALLET,
       name: "revoke-then-resolve",
       authSecret: SECRET,
+      chainId: 1,
     });
 
     await revokeApiKey(handle.db, id, WALLET);
@@ -98,6 +117,7 @@ describe("resolveApiKey()", () => {
       wallet: WALLET,
       name: "wrong-secret",
       authSecret: SECRET,
+      chainId: 1,
     });
     const result = await resolveApiKey(handle.db, plaintext, "wrong-secret");
     expect(result).toBeNull();
@@ -124,6 +144,7 @@ describe("revokeApiKey()", () => {
       wallet: WALLET,
       name: "acl-test",
       authSecret: SECRET,
+      chainId: 1,
     });
 
     const otherWallet = "0x0000000000000000000000000000000000000001" as Address;
@@ -137,6 +158,7 @@ describe("revokeApiKey()", () => {
       wallet: WALLET,
       name: "idempotent-revoke",
       authSecret: SECRET,
+      chainId: 1,
     });
     await revokeApiKey(handle.db, id, WALLET);
     await expect(revokeApiKey(handle.db, id, WALLET)).resolves.toBeUndefined();
@@ -149,6 +171,7 @@ describe("bumpLastUsed()", () => {
       wallet: WALLET,
       name: "bump-test",
       authSecret: SECRET,
+      chainId: 1,
     });
 
     const before = await listApiKeys(handle.db, WALLET);

@@ -29,6 +29,7 @@ import {
 } from "../state.js";
 import { resolveBillingIdentity } from "../middleware/api-key-resolve.js";
 import { pickForward, forward, ensureClientReady } from "../lib/forward.js";
+import { resolveBillingChain } from "../lib/chain-resolve.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -83,10 +84,20 @@ async function handleMintKey(
     return;
   }
 
+  // Bind the key to a billing chain. Validate the requested chainId against the
+  // live chain map; fall back to the configured default chain when the field is
+  // absent or names an unsupported/unconfigured chain.
+  const rawChainId = body?.["chainId"];
+  const requestedChainId =
+    typeof rawChainId === "number" ? rawChainId : Number(rawChainId);
+  const resolved = resolveBillingChain(requestedChainId);
+  const chainId = resolved.ok ? resolved.chain.chainId : config.chainId;
+
   const minted = await mintApiKey(db, {
     wallet: identity.wallet,
     name,
     authSecret: config.authSecret!,
+    chainId,
   });
 
   res.status(201).json({
@@ -97,6 +108,7 @@ async function handleMintKey(
     // (e.g. surface a "copy now" prompt) rather than assume future fetch.
     keyDisclosure: "shown_once_store_immediately",
     name,
+    chainId,
     createdAt: new Date().toISOString(),
   });
 }
@@ -125,6 +137,7 @@ async function handleListKeys(
     keys: keys.map((k) => ({
       id: k.id,
       name: k.name,
+      chainId: k.chainId,
       createdAt: k.createdAt.toISOString(),
       lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
       revokedAt: k.revokedAt ? k.revokedAt.toISOString() : null,
@@ -387,7 +400,7 @@ function clientKeysRoutes(): Route[] {
       name: "billing-keys-mint",
       handler: async (req, res) => {
         if (!ensureClientReady(res)) return;
-        const body = (req.body ?? {}) as { name?: string };
+        const body = (req.body ?? {}) as { name?: string; chainId?: number };
         await forward(res, () =>
           getBillingState().gateway!.keys.create(pickForward(req), body),
         );

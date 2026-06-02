@@ -43,6 +43,7 @@ describe("billing_credit_state", () => {
   it("inserts and selects a row with bigint balance fields", async () => {
     await handle.db.insert(creditState).values({
       wallet,
+      chainId: 1,
       balance: 1_000_000_000_000_000_000n, // 1e18 atto-PTON
       reserved: 500_000n,
       accrued: 250_000n,
@@ -66,6 +67,7 @@ describe("billing_credit_state", () => {
     await expect(
       handle.db.insert(creditState).values({
         wallet,
+        chainId: 1, // same (wallet, chainId) → composite PK conflict
         balance: 0n,
         reserved: 0n,
         accrued: 0n,
@@ -103,6 +105,7 @@ describe("billing_reservations", () => {
   beforeAll(async () => {
     await handle.db.insert(creditState).values({
       wallet,
+      chainId: 1,
       balance: 1000n,
       reserved: 0n,
       accrued: 0n,
@@ -115,6 +118,7 @@ describe("billing_reservations", () => {
       .insert(reservations)
       .values({
         wallet,
+        chainId: 1,
         amountPton: 100n,
         requestId: "req-abc-123",
         createdAt: new Date(),
@@ -156,6 +160,7 @@ describe("billing_consume_batches", () => {
     await handle.db.insert(consumeBatches).values({
       batchId,
       wallet: "0xaaaa",
+      chainId: 1,
       amountPton: 5_000n,
       state: "pending",
       attempts: 0,
@@ -179,6 +184,7 @@ describe("billing_consume_batches", () => {
       handle.db.insert(consumeBatches).values({
         batchId,
         wallet: "0xbbbb",
+        chainId: 1,
         amountPton: 1n,
         state: "pending",
         attempts: 0,

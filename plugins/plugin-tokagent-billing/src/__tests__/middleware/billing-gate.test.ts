@@ -104,6 +104,7 @@ async function seedBalance(db: BillingDatabase, wallet: Address, balance: bigint
     .insert(creditState)
     .values({
       wallet: w,
+      chainId: 1,
       balance,
       reserved: 0n,
       accrued: 0n,
@@ -112,7 +113,7 @@ async function seedBalance(db: BillingDatabase, wallet: Address, balance: bigint
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: creditState.wallet,
+      target: [creditState.wallet, creditState.chainId],
       set: { balance, reserved: 0n, accrued: 0n, updatedAt: new Date() },
     });
 }
@@ -180,6 +181,7 @@ describe("applyBillingGate — rejection paths", () => {
   it("returns 400 unsupported_model when model field is missing", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-missing-model",
       authSecret: AUTH_SECRET,
@@ -207,6 +209,7 @@ describe("applyBillingGate — rejection paths", () => {
   it("returns 400 unsupported_model when model is not in allowlist", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-bad-model",
       authSecret: AUTH_SECRET,
@@ -235,6 +238,7 @@ describe("applyBillingGate — rejection paths", () => {
   it("returns 503 when no TWAP price and no fixedTonUsd", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-no-price",
       authSecret: AUTH_SECRET,
@@ -260,6 +264,7 @@ describe("applyBillingGate — rejection paths", () => {
   it("returns 402 insufficient_balance when balance is 0", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-insufficient",
       authSecret: AUTH_SECRET,
@@ -294,6 +299,7 @@ describe("applyBillingGate — happy path with TWAP cache", () => {
   it("allows the request and creates a reservation when balance is sufficient", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-happy-twap",
       authSecret: AUTH_SECRET,
@@ -335,6 +341,7 @@ describe("applyBillingGate — fixedTonUsd bypass", () => {
   it("allows the request without TWAP cache when fixedTonUsd is set", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-fixed-bypass",
       authSecret: AUTH_SECRET,
@@ -365,6 +372,7 @@ describe("applyBillingGate — commit closure", () => {
   it("marks the reservation as committed and accrues the charge", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-commit",
       authSecret: AUTH_SECRET,
@@ -410,6 +418,7 @@ describe("applyBillingGate — release closure", () => {
   it("restores the reserved amount to balance with the given outcome", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "gate-release",
       authSecret: AUTH_SECRET,

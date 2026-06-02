@@ -11,6 +11,7 @@
 import { Service, logger, type IAgentRuntime } from "@elizaos/core";
 import { flushNow, type ConsumeWorkerDeps } from "@tokagentos/billing";
 import { resolveBillingRuntime, type BillingRuntimeDeps } from "./_runtime-deps.js";
+import { resolveBillingChain, getClientsForChain } from "../lib/chain-resolve.js";
 
 const log = logger.child({ src: "billing:service:consume" });
 
@@ -43,12 +44,22 @@ export class ConsumeService extends Service {
 
     this.workerDeps = {
       db,
-      clients,
-      vaultAddress: config.vaultAddress,
       config: {
         consumeBatchMinPton: config.consumeBatchMinPton,
         consumeMaxAgeMs: config.consumeMaxAgeMs,
         consumeMaxPerCycle: config.consumeMaxPerCycle,
+      },
+      // Per-chain settlement: each accrual is consumed on its own chain's vault.
+      // `clients` (the default-chain bundle) is reused when chainId === the
+      // configured default; other chains build from their named RPC env
+      // (BILLING_BASE_RPC_URL, …). Returns null when a chain has no live deploy
+      // or no RPC configured — the worker logs and skips rather than mis-settle.
+      resolveChain: (chainId: number) => {
+        const chain = resolveBillingChain(chainId);
+        if (!chain.ok) return null;
+        const cl = getClientsForChain(chainId, config, clients);
+        if (!cl.ok) return null;
+        return { clients: cl.clients, vaultAddress: chain.chain.vaultAddress };
       },
     };
 

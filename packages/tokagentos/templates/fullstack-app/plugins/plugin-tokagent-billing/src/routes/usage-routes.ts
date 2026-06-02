@@ -377,12 +377,17 @@ async function handleStats(
   const { db, config } = getServerBillingState();
   if (!config.enabled) return billingUnavailable(res);
 
-  // Total wallets with any credits.
+  // Total DISTINCT wallets with any credits. `creditState` is now keyed by
+  // (wallet, chainId) — one row per chain a wallet has credits on — so a plain
+  // COUNT(*) would over-count a wallet that holds credits on multiple chains.
+  // COUNT(DISTINCT wallet) preserves the "total wallets" semantic.
   const walletRows = await db
-    .select({ count: count() })
+    .select({ count: sql<number>`count(distinct ${creditState.wallet})` })
     .from(creditState);
 
-  // Aggregate accrued + balance across all wallets.
+  // Aggregate accrued + balance across ALL per-chain rows — the SUM is the
+  // correct global total across every chain (each chain's row contributes its
+  // own balance/accrued).
   const aggRows = await db
     .select({
       totalAccrued: sum(creditState.accrued),

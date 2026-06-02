@@ -38,6 +38,8 @@ import {
   usdToPton,
   topupQuotes,
   creditBackingDeposit,
+  readCredits,
+  hydrate as hydrateCredits,
 } from "@tokagentos/billing";
 import { eq } from "drizzle-orm";
 import {
@@ -679,6 +681,20 @@ async function handleTopupSettle(
     await creditBackingDeposit(db, identity.wallet, resolvedChainId, auth.value);
   } catch (err) {
     // Best-effort attribution only; logged, never surfaced to the caller.
+    void err;
+  }
+
+  // Reflect the new on-chain deposit in the (wallet, resolvedChainId) ledger
+  // row immediately, so the dashboard shows the topped-up spendable balance
+  // without waiting for the next hydrate-on-read in GET /v1/credits/me. Read
+  // the SETTLED chain's vault via that chain's clients, then hydrate the
+  // matching per-chain ledger row. Non-fatal: the on-chain deposit already
+  // succeeded, so a hydrate hiccup must not turn a successful settle into an
+  // error — GET /v1/credits/me self-heals the balance on the next read.
+  try {
+    const onChain = await readCredits(clients, resolvedVault, identity.wallet);
+    await hydrateCredits(db, identity.wallet, resolvedChainId, onChain);
+  } catch (err) {
     void err;
   }
 

@@ -267,6 +267,9 @@ export async function initBillingPlugin(runtime: IAgentRuntime): Promise<void> {
     wrapRuntimeUseModel(runtime, {
       db,
       marginBps: config.marginBps,
+      // Internal useModel calls have no API key → bill on the operator's
+      // configured chain (BILLING_CHAIN_ID, default 1).
+      chainId: config.chainId,
       tonUsdGetter: () => {
         try {
           const state = getBillingState();

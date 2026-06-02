@@ -88,6 +88,7 @@ describe("resolveBillingIdentity — x-api-key path", () => {
     });
 
     const { plaintext, id } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet: WALLET,
       name: "resolver-test",
       authSecret: AUTH_SECRET,
@@ -158,6 +159,7 @@ describe("resolveBillingIdentity — precedence", () => {
     // Mint a key for WALLET; issue a JWT for a DIFFERENT wallet. The x-api-key
     // path should return WALLET (not the JWT wallet).
     const { plaintext, id } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet: WALLET,
       name: "precedence-test",
       authSecret: AUTH_SECRET,

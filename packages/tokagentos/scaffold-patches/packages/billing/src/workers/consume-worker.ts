@@ -72,13 +72,22 @@ export interface ConsumeWorkerConfig {
 
 export interface ConsumeWorkerDeps {
   db: BillingDatabase;
-  clients: BillingClients;
-  vaultAddress: Address;
   config: ConsumeWorkerConfig;
+  /**
+   * Resolve the operator clients + vault for a given chainId. Each accrual is
+   * settled on ITS OWN chain's vault (per-chain billing). Returns null when the
+   * chain has no live billing deploy or no configured RPC — the worker logs and
+   * skips that candidate rather than settling on the wrong vault.
+   */
+  resolveChain: (
+    chainId: number,
+  ) => { clients: BillingClients; vaultAddress: Address } | null;
 }
 
 export interface FlushCandidate {
   wallet: Address;
+  /** The chain this accrual was billed on; consume settles on this chain's vault. */
+  chainId: number;
   amount: bigint;
   firstAccrualAt: Date;
   batchId: Hex;
@@ -113,12 +122,16 @@ export interface FlushResult {
  */
 export function computeBatchId(
   wallet: Address,
+  chainId: number,
   firstAccrualAt: Date,
   amount: bigint,
 ): Hex {
+  // chainId is folded into the preimage so per-chain batches for the same
+  // wallet/amount/timestamp never collide (which would silently skip one
+  // chain's consume as "already used").
   return keccak256(
     stringToHex(
-      `consume:${wallet.toLowerCase()}:${firstAccrualAt.getTime()}:${amount.toString()}`,
+      `consume:${wallet.toLowerCase()}:${chainId}:${firstAccrualAt.getTime()}:${amount.toString()}`,
     ),
   );
 }
@@ -197,9 +210,10 @@ export async function selectFlushable(
 
     candidates.push({
       wallet,
+      chainId: row.chainId,
       amount: row.accrued,
       firstAccrualAt: row.firstAccrualAt,
-      batchId: computeBatchId(wallet, row.firstAccrualAt, row.accrued),
+      batchId: computeBatchId(wallet, row.chainId, row.firstAccrualAt, row.accrued),
     });
   }
 
@@ -240,8 +254,20 @@ async function flushOne(
   deps: ConsumeWorkerDeps,
   candidate: FlushCandidate,
 ): Promise<boolean> {
-  const { db, clients, vaultAddress } = deps;
-  const { wallet, amount, batchId, firstAccrualAt } = candidate;
+  const { db } = deps;
+  const { wallet, chainId, amount, batchId, firstAccrualAt } = candidate;
+  void firstAccrualAt; // retained for parity with the candidate shape
+
+  // Settle on THIS accrual's chain's vault — not a single global vault.
+  const resolved = deps.resolveChain(chainId);
+  if (!resolved) {
+    log.error(
+      { wallet, chainId, batchId },
+      "consume flush skipped — no live billing deploy / RPC for chain",
+    );
+    return false;
+  }
+  const { clients, vaultAddress } = resolved;
 
   // ---- Step 1: Check existing batch record ----
   const existing = await db
@@ -292,7 +318,7 @@ async function flushOne(
             .set({ state: "confirmed", lastAttemptAt: new Date() })
             .where(eq(consumeBatches.batchId, batchId));
         });
-        await flushAccrued(db, wallet);
+        await flushAccrued(db, wallet, chainId);
         return true;
       }
 
@@ -324,6 +350,7 @@ async function flushOne(
       await tx.insert(consumeBatches).values({
         batchId,
         wallet: wallet.toLowerCase(),
+        chainId,
         amountPton: amount,
         state: "submitted",
         attempts: 1,
@@ -371,7 +398,7 @@ async function flushOne(
           .set({ state: "confirmed", lastAttemptAt: new Date() })
           .where(eq(consumeBatches.batchId, batchId));
       });
-      await flushAccrued(db, wallet);
+      await flushAccrued(db, wallet, chainId);
       return true;
     }
 
@@ -421,7 +448,7 @@ async function flushOne(
   });
 
   // Zero the ledger's accrued for this wallet.
-  await flushAccrued(db, wallet);
+  await flushAccrued(db, wallet, chainId);
 
   log.info(
     { txHash, wallet, amount: amount.toString(), batchId },

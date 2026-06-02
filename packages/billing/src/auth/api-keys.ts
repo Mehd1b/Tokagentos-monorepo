@@ -41,7 +41,7 @@ export interface MintedApiKey {
  */
 export async function mintApiKey(
   db: BillingDatabase,
-  args: { wallet: Address; name: string; authSecret: string },
+  args: { wallet: Address; name: string; authSecret: string; chainId: number },
 ): Promise<MintedApiKey> {
   const raw = randomBytes(32).toString("hex");
   const plaintext = `${KEY_PREFIX}${raw}`;
@@ -52,6 +52,7 @@ export async function mintApiKey(
   await db.insert(apiKeys).values({
     id,
     wallet,
+    chainId: args.chainId,
     name: args.name,
     hash,
     createdAt: new Date(),
@@ -72,7 +73,7 @@ export async function resolveApiKey(
   db: BillingDatabase,
   plaintext: string,
   authSecret: string,
-): Promise<{ id: string; wallet: Address } | null> {
+): Promise<{ id: string; wallet: Address; chainId: number } | null> {
   if (typeof plaintext !== "string" || !plaintext.startsWith(KEY_PREFIX)) {
     return null;
   }
@@ -80,19 +81,20 @@ export async function resolveApiKey(
   const hash = hashKey(plaintext, authSecret);
 
   const rows = await db
-    .select({ id: apiKeys.id, wallet: apiKeys.wallet })
+    .select({ id: apiKeys.id, wallet: apiKeys.wallet, chainId: apiKeys.chainId })
     .from(apiKeys)
     .where(and(eq(apiKeys.hash, hash), isNull(apiKeys.revokedAt)));
 
   if (rows.length === 0) return null;
 
   const row = rows[0]!;
-  return { id: row.id, wallet: row.wallet as Address };
+  return { id: row.id, wallet: row.wallet as Address, chainId: row.chainId };
 }
 
 export interface ApiKeyListEntry {
   id: string;
   name: string;
+  chainId: number;
   createdAt: Date;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
@@ -110,6 +112,7 @@ export async function listApiKeys(
     .select({
       id: apiKeys.id,
       name: apiKeys.name,
+      chainId: apiKeys.chainId,
       createdAt: apiKeys.createdAt,
       lastUsedAt: apiKeys.lastUsedAt,
       revokedAt: apiKeys.revokedAt,
@@ -125,6 +128,7 @@ export async function listApiKeys(
     .map((r) => ({
       id: r.id,
       name: r.name,
+      chainId: r.chainId,
       createdAt: r.createdAt,
       lastUsedAt: r.lastUsedAt ?? null,
       revokedAt: r.revokedAt ?? null,

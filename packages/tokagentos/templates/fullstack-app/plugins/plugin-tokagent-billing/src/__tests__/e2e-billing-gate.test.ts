@@ -115,6 +115,7 @@ async function seedBalance(
     .insert(creditState)
     .values({
       wallet: w,
+      chainId: 1,
       balance,
       reserved: 0n,
       accrued: 0n,
@@ -123,7 +124,7 @@ async function seedBalance(
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
-      target: creditState.wallet,
+      target: [creditState.wallet, creditState.chainId],
       set: { balance, reserved: 0n, accrued: 0n, updatedAt: new Date() },
     });
 }
@@ -169,6 +170,7 @@ describe("e2e: applyBillingMiddleware — reserve → commit", () => {
   it("reserves credits, simulates upstream call, commits actual cost, preserves conservation", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "e2e-happy",
       authSecret: AUTH_SECRET,
@@ -289,6 +291,7 @@ describe("e2e: applyBillingMiddleware — reserve → commit", () => {
   it("commit() WITHOUT params still works (backward compat) — no call_log row", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "e2e-commit-no-params",
       authSecret: AUTH_SECRET,
@@ -335,6 +338,7 @@ describe("e2e: applyBillingMiddleware — insufficient balance", () => {
   it("returns 402 billing_error with insufficient_balance code", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "e2e-insufficient",
       authSecret: AUTH_SECRET,
@@ -383,6 +387,7 @@ describe("e2e: applyBillingMiddleware — release on abort", () => {
   it("restores the full reserved amount when release('released_abort') is called", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "e2e-release-abort",
       authSecret: AUTH_SECRET,
@@ -436,6 +441,7 @@ describe("e2e: applyBillingMiddleware — non-gated path passthrough", () => {
   it("returns allow=true without reserving for paths outside the gated set", async () => {
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
+      chainId: 1,
       wallet,
       name: "e2e-passthrough",
       authSecret: AUTH_SECRET,

@@ -28,6 +28,12 @@ export interface BillingIdentity {
   wallet: Address;
   /** Present when identity was resolved from `x-api-key`. */
   apiKeyId?: string;
+  /**
+   * Chain the API key is bound to (from `resolveApiKey`). Present only when
+   * identity was resolved from an API key — JWT/dev-wallet paths leave this
+   * undefined so the caller falls back to `config.chainId`.
+   */
+  chainId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +83,7 @@ export async function resolveBillingIdentity(
   if (apiKey) {
     const result = await resolveApiKey(db, apiKey, authSecret);
     if (result) {
-      return { wallet: result.wallet, apiKeyId: result.id };
+      return { wallet: result.wallet, apiKeyId: result.id, chainId: result.chainId };
     }
   }
 
@@ -92,7 +98,7 @@ export async function resolveBillingIdentity(
     if (bearer.startsWith("sk-ai-")) {
       const result = await resolveApiKey(db, bearer, authSecret);
       if (result) {
-        return { wallet: result.wallet, apiKeyId: result.id };
+        return { wallet: result.wallet, apiKeyId: result.id, chainId: result.chainId };
       }
       // Fall through to JWT path — defensive, in case some future API key
       // format collides with the prefix check.

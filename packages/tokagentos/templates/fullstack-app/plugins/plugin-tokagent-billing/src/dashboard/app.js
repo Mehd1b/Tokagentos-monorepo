@@ -1961,7 +1961,7 @@ function wireKeyCreate() {
     try {
       const r = await apiJson("/v1/keys", {
         method: "POST",
-        body: JSON.stringify(name ? { name } : {}),
+        body: JSON.stringify({ ...(name ? { name } : {}), chainId: state.selectedChainId }),
       });
       // Show the plaintext exactly once — modal blocks closing without ack.
       const modal = $("#key-modal");

@@ -34,6 +34,7 @@ const MOCK_RUNTIME_DEPS = {
     mainnetClient: {},
   },
   config: {
+    chainId: 1,
     vaultAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as `0x${string}`,
     consumeBatchMinPton: 500_000_000_000_000_000n,
     consumeMaxAgeMs: 300_000,

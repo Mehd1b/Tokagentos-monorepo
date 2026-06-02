@@ -32,8 +32,9 @@ const VAULT = "0x1234567890123456789012345678901234567890" as Address;
 function makeDeps(db: TestDbHandle["db"]): WithdrawWatcherDeps {
   return {
     db,
-    clients: {} as never,
-    vaultAddress: VAULT,
+    // Per-chain resolver — every chainId maps to the same mock clients + vault
+    // here; the priority flush itself is mocked at the module level.
+    resolveChain: () => ({ clients: {} as never, vaultAddress: VAULT }),
     config: {
       consumeBatchMinPton: 500_000_000_000_000_000n,
       consumeMaxAgeMs: 300_000,
@@ -78,6 +79,7 @@ describe("handleWithdrawRequested", () => {
   it("calls flushNow with priorityWallet when accrued > 0", async () => {
     await handle.db.insert(creditState).values({
       wallet: WALLET_A.toLowerCase(),
+      chainId: 1,
       balance: 0n,
       reserved: 0n,
       accrued: 100_000_000_000_000_000n,
@@ -104,6 +106,7 @@ describe("handleWithdrawRequested", () => {
 
     await handle.db.insert(creditState).values({
       wallet: WALLET_A.toLowerCase(),
+      chainId: 1,
       balance: 0n,
       reserved: 0n,
       accrued: 100_000_000_000_000_000n,

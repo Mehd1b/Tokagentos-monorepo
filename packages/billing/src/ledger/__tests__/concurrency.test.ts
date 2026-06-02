@@ -23,6 +23,7 @@ import { hydrate } from "../ledger.js";
 import type { Address } from "viem";
 
 const WALLET = "0xcccc000000000000000000000000000000000099" as Address;
+const CHAIN = 1;
 const BALANCE = 100n;
 const RESERVE_AMOUNT = 20n;
 const CONCURRENCY = 10;
@@ -62,13 +63,14 @@ describe("concurrency: 10 concurrent reserves on the same wallet", () => {
           .delete(creditState)
           .where(eq(creditState.wallet, WALLET.toLowerCase()));
 
-        await hydrate(handle.db, WALLET, BALANCE);
+        await hydrate(handle.db, WALLET, CHAIN, BALANCE);
 
         // Launch 10 concurrent reserves
         const results = await Promise.all(
           Array.from({ length: CONCURRENCY }, (_, i) =>
             reserve(handle.db, {
               wallet: WALLET,
+              chainId: CHAIN,
               amount: RESERVE_AMOUNT,
               requestId: `iter${iter}-slot${i}`,
             }),

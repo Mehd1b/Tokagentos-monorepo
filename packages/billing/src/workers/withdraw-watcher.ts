@@ -28,9 +28,12 @@ const log = logger.child({ src: "billing:worker:withdraw-watcher" });
 
 export interface WithdrawWatcherDeps {
   db: BillingDatabase;
-  clients: BillingClients;
-  vaultAddress: Address;
   config: ConsumeWorkerConfig;
+  /** Per-chain resolver (same shape as ConsumeWorkerDeps) so the priority flush
+   *  settles each of the wallet's accruals on its own chain's vault. */
+  resolveChain: (
+    chainId: number,
+  ) => { clients: BillingClients; vaultAddress: Address } | null;
 }
 
 export interface WithdrawRequestedEvent {
@@ -65,13 +68,13 @@ export async function handleWithdrawRequested(
     return;
   }
 
-  // Check local ledger accrued for this user.
+  // Check local ledger accrued for this user across ALL its per-chain rows.
   const rows = await deps.db
     .select({ accrued: creditState.accrued })
     .from(creditState)
     .where(eq(creditState.wallet, user.toLowerCase()));
 
-  const accrued = rows[0]?.accrued ?? 0n;
+  const accrued = rows.reduce((sum, r) => sum + r.accrued, 0n);
 
   if (accrued <= 0n) {
     // No-op: user has nothing accrued, so pre-emption is unnecessary. This is

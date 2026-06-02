@@ -177,6 +177,10 @@ export async function applyBillingGate(
     };
   }
   const wallet = identity.wallet;
+  // Chain source for a request = the API key's chainId (identity.chainId) ??
+  // config.chainId (BILLING_CHAIN_ID default = 1). The reservation row stores
+  // the chain so commit/release can recover it internally.
+  const chainId = identity.chainId ?? config.chainId;
 
   // ---- 2. Detect and validate model ----
   const rawModel = extractModel(body);
@@ -248,7 +252,7 @@ export async function applyBillingGate(
   const requestId = randomUUID();
 
   // ---- 6. Attempt to reserve ----
-  const result = await reserve(db, { wallet, amount: maxPton, requestId });
+  const result = await reserve(db, { wallet, chainId, amount: maxPton, requestId });
   if (!result.ok) {
     return {
       allow: false,
@@ -284,6 +288,7 @@ export async function applyBillingGate(
       try {
         await db.insert(callLog).values({
           wallet: wallet.toLowerCase(),
+          chainId,
           apiKeyId: identity.apiKeyId ?? null,
           model: params.model ?? model,
           inputTokens: params.inputTokens ?? 0,

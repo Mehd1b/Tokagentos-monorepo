@@ -26,8 +26,8 @@ import {
   getBacking,
   bridgeBacking,
 } from "@tokagentos/billing";
-import { resolveBillingChain } from "../lib/chain-resolve.js";
-import { eq } from "drizzle-orm";
+import { resolveBillingChain, getClientsForChain } from "../lib/chain-resolve.js";
+import { and, eq } from "drizzle-orm";
 
 /** Parse an optional chainId. undefined = absent, null = present-but-invalid. */
 function parseChainId(raw: unknown): number | undefined | null {
@@ -78,7 +78,7 @@ async function handleGetCreditsMe(
   _runtime: IAgentRuntime,
 ): Promise<void> {
   if (!isBillingStateInitialized()) return billingUnavailable(res);
-  const { db, config, clients } = getServerBillingState();
+  const { db, config, clients: defaultClients } = getServerBillingState();
   if (!config.enabled) return billingUnavailable(res);
 
   const identity = await resolveBillingIdentity(toIncomingMessage(req));
@@ -89,6 +89,12 @@ async function handleGetCreditsMe(
 
   const wallet: Address = identity.wallet;
   const walletKey = wallet.toLowerCase();
+
+  // Which chain's ledger is the caller asking about? The credit ledger is now
+  // keyed by (wallet, chainId), so balance/reserved/accrued + the hydrate-on-
+  // read are all per-chain. Absent ?chainId= falls back to config.chainId.
+  const reqChainId = parseChainId(req.query?.["chainId"]);
+  const chainId = reqChainId && reqChainId > 0 ? reqChainId : config.chainId;
 
   // Sync on-chain credits → DB ledger BEFORE returning the balance.
   //
@@ -102,28 +108,38 @@ async function handleGetCreditsMe(
   //   - The vault's `credits[user]` mapping is the source of truth.
   //     hydrate() reconciles: balance = onChain - (reserved + accrued).
   //
+  // PER-CHAIN: read the SELECTED chain's vault via that chain's clients, then
+  // hydrate that (wallet, chainId) row — not the default vault. If the chain
+  // can't be resolved (unknown chain, no operator RPC configured), skip the
+  // hydrate and return whatever the ledger already holds.
+  //
   // Costs: one eth_call per dashboard refresh. Acceptable — this route is
   // not on the hot inference path.
   //
   // Failure handling: if the RPC call throws, fall back to the stale DB
   // row rather than 500ing. The user sees a slightly old balance instead
   // of a broken page.
-  try {
-    const onChainCredits = await readCredits(
-      clients,
-      config.vaultAddress,
-      wallet,
-    );
-    await hydrateCredits(db, wallet, onChainCredits);
-  } catch (_err) {
-    // Swallow — fall back to whatever the DB has. Logged at hydrate level.
+  const resolvedChain = resolveBillingChain(chainId);
+  const chainClientsResult = getClientsForChain(chainId, config, defaultClients);
+  if (resolvedChain.ok && chainClientsResult.ok) {
+    try {
+      const onChainCredits = await readCredits(
+        chainClientsResult.clients,
+        resolvedChain.chain.vaultAddress,
+        wallet,
+      );
+      await hydrateCredits(db, wallet, chainId, onChainCredits);
+    } catch (_err) {
+      // Swallow — fall back to whatever the DB has. Logged at hydrate level.
+    }
   }
 
-  // Read the credit state row (may not exist for a new wallet).
+  // Read the credit state row for THIS chain (may not exist for a new wallet
+  // or a chain the wallet has never touched).
   const rows = await db
     .select()
     .from(creditState)
-    .where(eq(creditState.wallet, walletKey));
+    .where(and(eq(creditState.wallet, walletKey), eq(creditState.chainId, chainId)));
 
   const row = rows[0];
 
@@ -136,9 +152,7 @@ async function handleGetCreditsMe(
   const accrued = row ? row.accrued.toString() : "0";
 
   // Per-network backing ("global spend, per-network backing"). `balance` above
-  // stays the single GLOBAL spendable; `backing` is this chain's attribution.
-  const reqChainId = parseChainId(req.query?.["chainId"]);
-  const chainId = reqChainId && reqChainId > 0 ? reqChainId : config.chainId;
+  // is this chain's spendable; `backing` is this chain's attribution.
   let backing = "0";
   try {
     backing = (await getBacking(db, wallet, chainId)).toString();

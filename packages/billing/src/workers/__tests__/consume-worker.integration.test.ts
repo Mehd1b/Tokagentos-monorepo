@@ -71,6 +71,7 @@ describe.skipIf(SKIP)("consume-worker integration (Anvil)", () => {
   let clients: BillingClients;
 
   const USER: Address = ANVIL_ACCOUNT_1.address;
+  const ANVIL_CHAIN_ID = 31337; // Anvil's default chain id
   const DEPOSIT_AMOUNT = 10_000_000_000_000_000_000n; // 10 PTON-units
   const ACCRUED_AMOUNT = 600_000_000_000_000_000n; // 0.6 PTON — above 0.5 min threshold
 
@@ -101,8 +102,12 @@ describe.skipIf(SKIP)("consume-worker integration (Anvil)", () => {
 
     deps = {
       db,
-      clients,
-      vaultAddress: harness.vaultAddress,
+      // Anvil runs at chainId 31337 — the seeded accrual below is billed on it,
+      // so the resolver returns this harness's clients + vault for that chain.
+      resolveChain: (chainId: number) =>
+        chainId === ANVIL_CHAIN_ID
+          ? { clients, vaultAddress: harness.vaultAddress }
+          : null,
       config: {
         consumeBatchMinPton: 500_000_000_000_000_000n,
         consumeMaxAgeMs: 300_000,
@@ -129,7 +134,7 @@ describe.skipIf(SKIP)("consume-worker integration (Anvil)", () => {
     await clients.publicClient.waitForTransactionReceipt({ hash: faucetHash });
 
     // 2. Sign EIP-3009 TransferWithAuthorization
-    const chainId = 31337;
+    const chainId = ANVIL_CHAIN_ID;
     const nonce =
       "0x0000000000000000000000000000000000000000000000000000000000000042" as const;
     const validBefore = 9_999_999_999n;
@@ -181,6 +186,7 @@ describe.skipIf(SKIP)("consume-worker integration (Anvil)", () => {
     const firstAccrualAt = new Date();
     await db.insert(creditState).values({
       wallet: USER.toLowerCase(),
+      chainId: ANVIL_CHAIN_ID,
       balance: 0n,
       reserved: 0n,
       accrued: ACCRUED_AMOUNT,

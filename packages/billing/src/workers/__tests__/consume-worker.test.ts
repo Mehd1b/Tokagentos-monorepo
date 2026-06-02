@@ -50,6 +50,8 @@ import * as vaultModule from "../../chain/vault.js";
 
 const WALLET_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Address;
 const WALLET_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Address;
+const CHAIN = 1;
+const VAULT = "0x1234567890123456789012345678901234567890" as Address;
 
 const DEFAULT_CONFIG: ConsumeWorkerConfig = {
   consumeBatchMinPton: 500_000_000_000_000_000n, // 0.5 PTON
@@ -61,12 +63,14 @@ function makeDeps(
   db: TestDbHandle["db"],
   config: Partial<ConsumeWorkerConfig> = {},
 ): ConsumeWorkerDeps {
+  const clients = makeMockClients(() =>
+    Promise.resolve("0xdeadbeef" as Hex),
+  ) as never;
   return {
     db,
-    clients: makeMockClients(() =>
-      Promise.resolve("0xdeadbeef" as Hex),
-    ) as never,
-    vaultAddress: "0x1234567890123456789012345678901234567890" as Address,
+    // Per-chain resolver — every chainId in these unit tests maps to the same
+    // mock clients + vault (the on-chain layer is mocked at the module level).
+    resolveChain: () => ({ clients, vaultAddress: VAULT }),
     config: { ...DEFAULT_CONFIG, ...config },
   };
 }
@@ -76,9 +80,11 @@ async function seedCreditState(
   wallet: Address,
   accrued: bigint,
   firstAccrualAt: Date = new Date(),
+  chainId: number = CHAIN,
 ) {
   await db.insert(creditState).values({
     wallet: wallet.toLowerCase(),
+    chainId,
     balance: 1_000_000_000_000_000_000n,
     reserved: 0n,
     accrued,
@@ -98,8 +104,8 @@ describe("computeBatchId", () => {
     const ts = new Date("2026-01-01T00:00:00.000Z");
     const amount = 1_000_000_000_000_000_000n;
 
-    const id1 = computeBatchId(wallet, ts, amount);
-    const id2 = computeBatchId(wallet, ts, amount);
+    const id1 = computeBatchId(wallet, CHAIN, ts, amount);
+    const id2 = computeBatchId(wallet, CHAIN, ts, amount);
 
     expect(id1).toBe(id2);
     expect(id1).toMatch(/^0x[0-9a-f]{64}$/);
@@ -108,15 +114,23 @@ describe("computeBatchId", () => {
   it("produces different IDs for different wallets", () => {
     const ts = new Date();
     const amount = 1n;
-    expect(computeBatchId(WALLET_A, ts, amount)).not.toBe(
-      computeBatchId(WALLET_B, ts, amount),
+    expect(computeBatchId(WALLET_A, CHAIN, ts, amount)).not.toBe(
+      computeBatchId(WALLET_B, CHAIN, ts, amount),
     );
   });
 
   it("produces different IDs for different amounts", () => {
     const ts = new Date();
-    expect(computeBatchId(WALLET_A, ts, 1n)).not.toBe(
-      computeBatchId(WALLET_A, ts, 2n),
+    expect(computeBatchId(WALLET_A, CHAIN, ts, 1n)).not.toBe(
+      computeBatchId(WALLET_A, CHAIN, ts, 2n),
+    );
+  });
+
+  it("produces different IDs for the same wallet/amount/ts on different chains", () => {
+    const ts = new Date();
+    const amount = 1_000_000_000_000_000_000n;
+    expect(computeBatchId(WALLET_A, 1, ts, amount)).not.toBe(
+      computeBatchId(WALLET_A, 8453, ts, amount),
     );
   });
 });
@@ -352,11 +366,12 @@ describe("flushNow", () => {
 
     // Seed a stuck `submitted` row dated 10 minutes ago (> SUBMITTED_TIMEOUT_MS).
     const { computeBatchId } = await import("../consume-worker.js");
-    const batchId = computeBatchId(WALLET_A, firstAccrualAt, accrued);
+    const batchId = computeBatchId(WALLET_A, CHAIN, firstAccrualAt, accrued);
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     await handle.db.insert(consumeBatches).values({
       batchId,
       wallet: WALLET_A.toLowerCase(),
+      chainId: CHAIN,
       amountPton: accrued,
       state: "submitted",
       attempts: 1,
@@ -397,11 +412,12 @@ describe("flushNow", () => {
 
     // Seed a stuck `submitted` row from 10 minutes ago.
     const { computeBatchId } = await import("../consume-worker.js");
-    const batchId = computeBatchId(WALLET_A, firstAccrualAt, accrued);
+    const batchId = computeBatchId(WALLET_A, CHAIN, firstAccrualAt, accrued);
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     await handle.db.insert(consumeBatches).values({
       batchId,
       wallet: WALLET_A.toLowerCase(),
+      chainId: CHAIN,
       amountPton: accrued,
       state: "submitted",
       attempts: 1,
@@ -438,12 +454,13 @@ describe("flushNow", () => {
     await seedCreditState(handle.db, WALLET_A, accrued, firstAccrualAt);
 
     const { computeBatchId } = await import("../consume-worker.js");
-    const batchId = computeBatchId(WALLET_A, firstAccrualAt, accrued);
+    const batchId = computeBatchId(WALLET_A, CHAIN, firstAccrualAt, accrued);
     // 1 minute ago — well under the 5-minute SUBMITTED_TIMEOUT_MS.
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
     await handle.db.insert(consumeBatches).values({
       batchId,
       wallet: WALLET_A.toLowerCase(),
+      chainId: CHAIN,
       amountPton: accrued,
       state: "submitted",
       attempts: 1,

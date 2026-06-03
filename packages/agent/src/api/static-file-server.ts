@@ -176,8 +176,14 @@ export function serveStaticUi(
   const root = resolveUiDir();
   if (!root) return false;
 
-  // Keep API and WebSocket namespaces exclusively owned by server handlers.
-  if (isAuthProtectedRoute(pathname)) return false;
+  // Keep API and WebSocket namespaces (/api, /v1, /ws) exclusively owned by
+  // their route handlers — never serve them as a static file or the SPA index.
+  // This MUST use isServerOwnedNamespace, not isAuthProtectedRoute: billing
+  // public routes (e.g. GET /v1/model) are exempt from auth but are still
+  // server-owned, and must reach the plugin dispatcher rather than fall through
+  // to the index.html fallback below (which would return HTML to a JSON fetch
+  // and silently break the chat's active-model pill).
+  if (isServerOwnedNamespace(pathname)) return false;
 
   let decodedPath: string;
   try {
@@ -302,7 +308,7 @@ export function serveStaticUi(
 // (e.g. /v1/keys/:id for the revoke endpoint). Stored without trailing slash;
 // the check below adds one when comparing for the sub-path case so /v1/keys
 // doesn't accidentally exempt /v1/keysomething.
-const BILLING_PUBLIC_V1_ROOTS = [
+export const BILLING_PUBLIC_V1_ROOTS = [
   "/v1/auth",
   "/v1/billing",
   "/v1/topup",
@@ -319,6 +325,28 @@ const BILLING_PUBLIC_V1_ROOTS = [
   "/v1/quote", // /v1/quote/:id
 ];
 
+/**
+ * True when `pathname` belongs to a server-owned namespace (/api, /v1, /ws) and
+ * must NEVER be served as a static file or the SPA index.html — regardless of
+ * whether it requires auth. The static UI server uses this to decline API and
+ * WebSocket paths so they fall through to their route handlers.
+ *
+ * Distinct from `isAuthProtectedRoute`: a billing public route (e.g. GET
+ * /v1/model) is server-owned (true here) but NOT auth-protected (false there).
+ * Conflating the two is how /v1/model regressed into being served as HTML once
+ * it was added to BILLING_PUBLIC_V1_ROOTS.
+ */
+export function isServerOwnedNamespace(pathname: string): boolean {
+  return (
+    pathname === "/api" ||
+    pathname.startsWith("/api/") ||
+    pathname === "/v1" ||
+    pathname.startsWith("/v1/") ||
+    pathname === "/ws" ||
+    pathname.startsWith("/ws/")
+  );
+}
+
 export function isAuthProtectedRoute(pathname: string): boolean {
   // Carve out billing-plugin public routes — they have their own auth
   // (SIWE EIP-712 LoginAuth + sk-ai-* HMAC API keys + per-route rate limits).
@@ -329,12 +357,5 @@ export function isAuthProtectedRoute(pathname: string): boolean {
   ) {
     return false;
   }
-  return (
-    pathname === "/api" ||
-    pathname.startsWith("/api/") ||
-    pathname === "/v1" ||
-    pathname.startsWith("/v1/") ||
-    pathname === "/ws" ||
-    pathname.startsWith("/ws/")
-  );
+  return isServerOwnedNamespace(pathname);
 }

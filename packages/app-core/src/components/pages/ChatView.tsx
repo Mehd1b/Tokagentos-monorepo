@@ -256,11 +256,11 @@ export function ChatView({
   const baseAgentName =
     characterData?.name || agentStatus?.agentName || "Agent";
   // Gateway-wide active model (GET /v1/model, public). Shown next to the agent
-  // name as a subtle suffix, e.g. "Kira · glm-4.7". Falls back to just the name
+  // name in parentheses, e.g. "Kira (glm-4.7)". Falls back to just the name
   // when the model has not loaded (or the gateway route is unavailable).
   const activeModel = useActiveModel();
   const agentName = activeModel
-    ? `${baseAgentName} · ${activeModel}`
+    ? `${baseAgentName} (${activeModel})`
     : baseAgentName;
   const msgs = conversationMessages;
   const visibleMsgs = useMemo(

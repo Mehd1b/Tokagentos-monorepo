@@ -188,19 +188,30 @@ export async function applyBillingGate(
   // the chain so commit/release can recover it internally.
   const chainId = identity.chainId ?? config.chainId;
 
-  // ---- 2. Detect and validate model ----
-  // When the client omits `model`, default to the gateway-wide active model
-  // (getActiveModel — "glm-4.7" when unset). We inject the resolved id back
-  // INTO the request body so the downstream LiteLLM forwarder sends it too;
-  // the proxy forwards the same `body` object we mutate here. When the client
-  // DID specify a model, we keep theirs (and the allowlist check still runs).
-  let rawModel = extractModel(body);
-  if (!rawModel) {
-    const active = await getActiveModel(db);
-    rawModel = active;
-    if (body && typeof body === "object") {
-      (body as Record<string, unknown>).model = active;
-    }
+  // ---- 2. Resolve and ENFORCE the gateway-wide active model ----
+  // ONE active model serves the whole gateway (set via PUT /v1/model) and, per
+  // the product decision, applies to BOTH the agent's own chat AND external
+  // API-key calls. We therefore ALWAYS override the request's model with
+  // getActiveModel — even when the caller specified one — and write it back INTO
+  // the request body so the downstream LiteLLM forwarder uses it and the call
+  // log records it (the proxy forwards the same `body` object we mutate here).
+  //
+  // Previously the active model was substituted ONLY when the body omitted
+  // `model`. But the agent's chat provider (plugin-openai) pins a concrete model
+  // at boot (e.g. "glm-4.7") and always sends it explicitly, so that branch was
+  // never taken — the model picker had no effect on the real LLM call. Enforcing
+  // unconditionally makes the gateway authoritative over which model is used.
+  const activeModel = await getActiveModel(db);
+  const requestedModel = extractModel(body);
+  if (requestedModel && requestedModel !== activeModel) {
+    log.debug(
+      { requestedModel, activeModel },
+      "overriding caller model with gateway active model",
+    );
+  }
+  const rawModel = activeModel;
+  if (body && typeof body === "object") {
+    (body as Record<string, unknown>).model = activeModel;
   }
   let model: string;
   try {

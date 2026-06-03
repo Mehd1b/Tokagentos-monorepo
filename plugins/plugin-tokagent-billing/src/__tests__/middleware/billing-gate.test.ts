@@ -4,7 +4,7 @@
  * Covers the full reserve/commit/release cycle plus all rejection paths:
  *   - 401 invalid_auth (no headers)
  *   - missing model → defaults to the gateway active model (no longer an error)
- *   - 400 unsupported_model (unknown model)
+ *   - any caller model → overridden to the gateway active model (gateway-authoritative)
  *   - 503 price oracle unavailable (no TWAP, no fixedTonUsd)
  *   - 402 insufficient_balance
  *   - happy path with TWAP cache snapshot
@@ -224,14 +224,20 @@ describe("applyBillingGate — rejection paths", () => {
     expect((body as Record<string, unknown>).model).toBe("glm-4.7");
   });
 
-  it("returns 400 unsupported_model when model is not in allowlist", async () => {
+  it("overrides any caller-supplied model with the gateway active model", async () => {
+    // New contract: the gateway-wide active model is authoritative. A caller
+    // that supplies any model — even one not in the allowlist — has it
+    // overridden to the active model rather than rejected. This is what makes
+    // the model picker effective: the agent's chat provider always sends a
+    // pinned model, and the gateway replaces it with the selected active model.
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
       chainId: 1,
       wallet,
-      name: "gate-bad-model",
+      name: "gate-override-model",
       authSecret: AUTH_SECRET,
     });
+    await seedBalance(handle.db, wallet, 10_000_000_000_000_000_000n);
     setBillingState({
       pool: { end: async () => {} } as unknown as BillingPluginState["pool"],
       db: handle.db,
@@ -239,18 +245,15 @@ describe("applyBillingGate — rejection paths", () => {
       config: makeConfig({ fixedTonUsd: TON_USD }),
     });
 
+    const body = makeBody({ model: "made-up-model" });
     const result = await applyBillingGate(
       makeReq({ "x-api-key": plaintext }),
-      makeBody({ model: "made-up-model" }),
+      body,
     );
-    expect(result.allow).toBe(false);
-    expect(result.status).toBe(400);
-    expect(result.reason).toBe("unsupported_model");
-    expect(result.body).toMatchObject({
-      type: "billing_error",
-      code: "unsupported_model",
-      message: expect.stringContaining("made-up-model"),
-    });
+    expect(result.allow).toBe(true);
+    // The caller's "made-up-model" was overridden to the gateway active model
+    // (getActiveModel → "glm-4.7" when unset) and written back into the body.
+    expect((body as Record<string, unknown>).model).toBe("glm-4.7");
   });
 
   it("returns 503 when no TWAP price and no fixedTonUsd", async () => {

@@ -20,6 +20,7 @@ import {
   useState,
 } from "react";
 import { type CodingAgentSession, client } from "../../api/client";
+import { useActiveModel } from "../../hooks/useActiveModel";
 import type {
   ConversationMessage,
   ImageAttachment,
@@ -295,10 +296,17 @@ export function ChatView({
     [setState],
   );
 
-  const agentName =
+  const baseAgentName =
     characterData?.name ||
     agentStatus?.agentName ||
     t("common.agent", { defaultValue: "Agent" });
+  // Gateway-wide active model (GET /v1/model, public). Shown next to the agent
+  // name in parentheses, e.g. "eliza (glm-4.7)". Falls back to just the name
+  // when the model has not loaded (or the gateway route is unavailable).
+  const activeModel = useActiveModel();
+  const agentName = activeModel
+    ? `${baseAgentName} (${activeModel})`
+    : baseAgentName;
   const msgs = Array.isArray(conversationMessages) ? conversationMessages : [];
   const visibleMsgs = useMemo(
     () =>

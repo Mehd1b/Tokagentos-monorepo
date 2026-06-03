@@ -154,6 +154,10 @@ export interface GatewayClient {
   topupStatus(headers: ForwardHeaders): Promise<ProxyResponse>;
   topupRevoke(headers: ForwardHeaders, body?: unknown): Promise<ProxyResponse>;
 
+  // Active model selection
+  modelGet(): Promise<ProxyResponse>;
+  modelSet(headers: ForwardHeaders, body: unknown): Promise<ProxyResponse>;
+
   // Quote details
   quoteGet(id: string): Promise<ProxyResponse>;
 
@@ -222,25 +226,17 @@ export interface GatewayProxy {
     refresh: (headers: ForwardHeaders) => Promise<ProxyResponse>;
     bridge: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
   };
+  model: {
+    get: () => Promise<ProxyResponse>;
+    set: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
+  };
   topup: {
     info: (headers: ForwardHeaders) => Promise<ProxyResponse>;
-    quote: (
-      headers: ForwardHeaders,
-      body: unknown,
-    ) => Promise<ProxyResponse>;
-    settle: (
-      headers: ForwardHeaders,
-      body: unknown,
-    ) => Promise<ProxyResponse>;
-    preauth: (
-      headers: ForwardHeaders,
-      body: unknown,
-    ) => Promise<ProxyResponse>;
+    quote: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
+    settle: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
+    preauth: (headers: ForwardHeaders, body: unknown) => Promise<ProxyResponse>;
     status: (headers: ForwardHeaders) => Promise<ProxyResponse>;
-    revoke: (
-      headers: ForwardHeaders,
-      body?: unknown,
-    ) => Promise<ProxyResponse>;
+    revoke: (headers: ForwardHeaders, body?: unknown) => Promise<ProxyResponse>;
     quoteGet: (id: string) => Promise<ProxyResponse>;
   };
   usage: {
@@ -383,6 +379,10 @@ export function createGatewayClient(opts: GatewayProxyOptions): GatewayClient {
     topupRevoke: (headers, body) =>
       request("POST", "/v1/topup/revoke", pickForwardHeaders(headers), body),
 
+    modelGet: () => request("GET", "/v1/model", {}, undefined),
+    modelSet: (headers, body) =>
+      request("PUT", "/v1/model", pickForwardHeaders(headers), body),
+
     quoteGet: (id) =>
       request("GET", `/v1/quote/${encodeURIComponent(id)}`, {}, undefined),
 
@@ -466,6 +466,10 @@ export function createGatewayProxy(opts: GatewayProxyOptions): GatewayProxy {
       refresh: (headers) => client.creditsRefresh(headers),
       bridge: (headers, body) => client.creditsBridge(headers, body),
     },
+    model: {
+      get: () => client.modelGet(),
+      set: (headers, body) => client.modelSet(headers, body),
+    },
     topup: {
       info: (headers) => client.topupInfo(headers),
       quote: (headers, body) => client.topupQuote(headers, body),
@@ -483,8 +487,7 @@ export function createGatewayProxy(opts: GatewayProxyOptions): GatewayProxy {
     },
     estimate: {
       estimate: (body) => client.estimate(body),
-      countTokens: (headers, body) =>
-        client.messagesCountTokens(headers, body),
+      countTokens: (headers, body) => client.messagesCountTokens(headers, body),
       price: () => client.price(),
     },
   };

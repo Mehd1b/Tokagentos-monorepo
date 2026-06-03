@@ -1,3 +1,4 @@
+export * from "./useActiveModel";
 export * from "./useActivityEvents";
 export * from "./useBugReport";
 export * from "./useCanvasWindow";

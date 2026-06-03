@@ -997,6 +997,103 @@ main {
 }
 
 /* ============================================================
+   MODEL PICKER (gateway-wide active model)
+   ============================================================ */
+.model-intro {
+  margin: -4px 0 16px 0;
+  line-height: 1.5;
+  max-width: 720px;
+}
+.model-intro code {
+  font-size: 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-soft);
+}
+.model-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .model-list { grid-template-columns: 1fr; }
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.model-row:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+}
+.model-row:disabled { cursor: default; opacity: 0.6; }
+.model-row.is-active {
+  background: var(--accent-subtle);
+  border-color: rgba(196, 245, 71, 0.45);
+  box-shadow: 0 0 0 1px rgba(196, 245, 71, 0.18);
+}
+.model-radio {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: transparent;
+  position: relative;
+  transition: border-color 120ms ease;
+}
+.model-row.is-active .model-radio { border-color: var(--accent); }
+.model-row.is-active .model-radio::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.model-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.model-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.model-row.is-active .model-label { color: var(--accent); }
+.model-id {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-feature-settings: "tnum";
+}
+.model-price {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-feature-settings: "tnum";
+  text-align: right;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* ============================================================
    TABLES
    ============================================================ */
 .data-table {

@@ -1,24 +1,25 @@
-import type { Plugin, IAgentRuntime } from "@tokagentos/core";
-import { ConsumeService } from "./services/consume-service.js";
-import { WithdrawWatcherService } from "./services/withdraw-service.js";
-import { TwapRefreshService } from "./services/twap-service.js";
-import { UsageCleanupService } from "./services/usage-cleanup-service.js";
-import { BillingMiddlewareService } from "./services/billing-middleware-service.js";
-import { initBillingPlugin, disposeBillingPlugin } from "./init.js";
-import { getAuthRoutes } from "./routes/auth-routes.js";
-import { getKeysRoutes } from "./routes/keys-routes.js";
-import { getCreditsRoutes } from "./routes/credits-routes.js";
-import { getTopupRoutes } from "./routes/topup-routes.js";
-import { getUsageRoutes } from "./routes/usage-routes.js";
-import { getEstimateRoutes } from "./routes/estimate-routes.js";
+import type { IAgentRuntime, Plugin } from "@tokagentos/core";
 // Phase 9: conversational setup action + routes
 import { setupBillingAction } from "./actions/setup-billing.js";
-import { getSetupRoutes } from "./routes/setup-routes.js";
-import { getSetupPanelRoutes } from "./routes/setup-panel-routes.js";
+import { disposeBillingPlugin, initBillingPlugin } from "./init.js";
+import { getAuthRoutes } from "./routes/auth-routes.js";
+import { getCreditsRoutes } from "./routes/credits-routes.js";
 // Operator dashboard SPA (migrated from llm-api-gateway)
 import { getDashboardRoutes } from "./routes/dashboard-routes.js";
+import { getEstimateRoutes } from "./routes/estimate-routes.js";
+import { getKeysRoutes } from "./routes/keys-routes.js";
 // LiteLLM proxy for /v1/messages + /v1/chat/completions (server-mode only)
 import { getMessagesProxyRoutes } from "./routes/messages-proxy-routes.js";
+import { getModelRoutes } from "./routes/model-routes.js";
+import { getSetupPanelRoutes } from "./routes/setup-panel-routes.js";
+import { getSetupRoutes } from "./routes/setup-routes.js";
+import { getTopupRoutes } from "./routes/topup-routes.js";
+import { getUsageRoutes } from "./routes/usage-routes.js";
+import { BillingMiddlewareService } from "./services/billing-middleware-service.js";
+import { ConsumeService } from "./services/consume-service.js";
+import { TwapRefreshService } from "./services/twap-service.js";
+import { UsageCleanupService } from "./services/usage-cleanup-service.js";
+import { WithdrawWatcherService } from "./services/withdraw-service.js";
 
 /**
  * Detect the BILLING_MODE at module-load time. The Plugin.routes array is
@@ -77,6 +78,8 @@ const BILLING_MODE: "server" | "client" =
  *   GET  /v1/keys                    — list API keys
  *   DELETE /v1/keys/:id              — revoke API key
  *   GET  /v1/credits/me              — credit ledger state for the caller
+ *   GET  /v1/model                   — gateway-wide active model + catalog (public)
+ *   PUT  /v1/model                   — set the gateway-wide active model (auth)
  *   GET  /v1/topup/info              — EIP-712 domain for client signing
  *   POST /v1/topup/quote             — PTON quote for a USD deposit
  *   POST /v1/topup/settle            — submit signed EIP-3009 to vault
@@ -130,6 +133,7 @@ export const tokagentBillingPlugin: Plugin = {
     ...getAuthRoutes(BILLING_MODE),
     ...getKeysRoutes(BILLING_MODE),
     ...getCreditsRoutes(BILLING_MODE),
+    ...getModelRoutes(BILLING_MODE),
     ...getTopupRoutes(BILLING_MODE),
     ...getUsageRoutes(BILLING_MODE),
     ...getEstimateRoutes(BILLING_MODE),

@@ -3,7 +3,8 @@
  *
  * Covers the full reserve/commit/release cycle plus all rejection paths:
  *   - 401 invalid_auth (no headers)
- *   - 400 unsupported_model (missing or unknown model)
+ *   - missing model → defaults to the gateway active model (no longer an error)
+ *   - 400 unsupported_model (unknown model)
  *   - 503 price oracle unavailable (no TWAP, no fixedTonUsd)
  *   - 402 insufficient_balance
  *   - happy path with TWAP cache snapshot
@@ -12,24 +13,24 @@
  *   - release() restores balance
  */
 
-import { describe, it, beforeAll, afterAll, beforeEach, expect } from "vitest";
 import type { IncomingMessage } from "node:http";
-import type { Address } from "viem";
+import {
+  type BillingDatabase,
+  creditState,
+  mintApiKey,
+  reservations,
+  TwapCache,
+} from "@tokagentos/billing";
 import { eq } from "drizzle-orm";
+import type { Address } from "viem";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { applyBillingGate } from "../../middleware/billing-gate.js";
 import {
-  setBillingState,
-  clearBillingState,
   type BillingPluginState,
+  clearBillingState,
+  setBillingState,
 } from "../../state.js";
 import { createTestDb, type TestDbHandle } from "../db-harness.js";
-import {
-  mintApiKey,
-  TwapCache,
-  creditState,
-  reservations,
-  type BillingDatabase,
-} from "@tokagentos/billing";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -49,7 +50,9 @@ function nextWallet(): Address {
 }
 
 /** Build a BillingPluginState["config"] stub with the required gate fields. */
-function makeConfig(extra: Record<string, unknown> = {}): BillingPluginState["config"] {
+function makeConfig(
+  extra: Record<string, unknown> = {},
+): BillingPluginState["config"] {
   return {
     enabled: true,
     authRequired: true,
@@ -78,11 +81,16 @@ function makeReq(headers: Record<string, string>): IncomingMessage {
   for (const [k, v] of Object.entries(headers)) {
     lowered[k.toLowerCase()] = v;
   }
-  return { headers: lowered, socket: { remoteAddress: undefined } } as unknown as IncomingMessage;
+  return {
+    headers: lowered,
+    socket: { remoteAddress: undefined },
+  } as unknown as IncomingMessage;
 }
 
 /** Standard well-formed chat-completions body. */
-function makeBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     model: "claude-haiku-4-5",
     messages: [{ role: "user", content: "hello world" }],
@@ -98,7 +106,11 @@ function makeBody(overrides: Record<string, unknown> = {}): Record<string, unkno
  * a known state. ON CONFLICT DO UPDATE resets balance/reserved/accrued so
  * a previous test's state never leaks into the next.
  */
-async function seedBalance(db: BillingDatabase, wallet: Address, balance: bigint): Promise<void> {
+async function seedBalance(
+  db: BillingDatabase,
+  wallet: Address,
+  balance: bigint,
+): Promise<void> {
   const w = wallet.toLowerCase();
   await db
     .insert(creditState)
@@ -119,7 +131,10 @@ async function seedBalance(db: BillingDatabase, wallet: Address, balance: bigint
 }
 
 /** Read the credit_state row for a wallet. */
-async function readState(db: BillingDatabase, wallet: Address): Promise<{
+async function readState(
+  db: BillingDatabase,
+  wallet: Address,
+): Promise<{
   balance: bigint;
   reserved: bigint;
   accrued: bigint;
@@ -178,7 +193,11 @@ describe("applyBillingGate — rejection paths", () => {
     });
   });
 
-  it("returns 400 unsupported_model when model field is missing", async () => {
+  it("defaults to the gateway active model when model field is missing", async () => {
+    // New contract: a missing `model` is NOT an error — the gate defaults it
+    // to the gateway-wide active model (getActiveModel → "glm-4.7" when unset)
+    // and injects it back into the body so the downstream LiteLLM forwarder
+    // sends it too. With a seeded balance the request is allowed.
     const wallet = nextWallet();
     const { plaintext } = await mintApiKey(handle.db, {
       chainId: 1,
@@ -186,6 +205,7 @@ describe("applyBillingGate — rejection paths", () => {
       name: "gate-missing-model",
       authSecret: AUTH_SECRET,
     });
+    await seedBalance(handle.db, wallet, 10_000_000_000_000_000_000n);
     setBillingState({
       pool: { end: async () => {} } as unknown as BillingPluginState["pool"],
       db: handle.db,
@@ -195,15 +215,13 @@ describe("applyBillingGate — rejection paths", () => {
 
     const body = makeBody();
     delete (body as Record<string, unknown>).model;
-    const result = await applyBillingGate(makeReq({ "x-api-key": plaintext }), body);
-    expect(result.allow).toBe(false);
-    expect(result.status).toBe(400);
-    expect(result.reason).toBe("unsupported_model");
-    expect(result.body).toMatchObject({
-      type: "billing_error",
-      code: "missing_model",
-      message: expect.any(String),
-    });
+    const result = await applyBillingGate(
+      makeReq({ "x-api-key": plaintext }),
+      body,
+    );
+    expect(result.allow).toBe(true);
+    // The active model was injected into the body so the proxy forwards it.
+    expect((body as Record<string, unknown>).model).toBe("glm-4.7");
   });
 
   it("returns 400 unsupported_model when model is not in allowlist", async () => {
@@ -251,7 +269,10 @@ describe("applyBillingGate — rejection paths", () => {
       // twapCache intentionally absent.
     });
 
-    const result = await applyBillingGate(makeReq({ "x-api-key": plaintext }), makeBody());
+    const result = await applyBillingGate(
+      makeReq({ "x-api-key": plaintext }),
+      makeBody(),
+    );
     expect(result.allow).toBe(false);
     expect(result.status).toBe(503);
     expect(result.body).toMatchObject({
@@ -277,7 +298,10 @@ describe("applyBillingGate — rejection paths", () => {
       config: makeConfig({ fixedTonUsd: TON_USD }),
     });
 
-    const result = await applyBillingGate(makeReq({ "x-api-key": plaintext }), makeBody());
+    const result = await applyBillingGate(
+      makeReq({ "x-api-key": plaintext }),
+      makeBody(),
+    );
     expect(result.allow).toBe(false);
     expect(result.status).toBe(402);
     expect(result.reason).toBe("insufficient_balance");

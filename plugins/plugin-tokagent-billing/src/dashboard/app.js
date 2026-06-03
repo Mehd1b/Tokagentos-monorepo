@@ -204,6 +204,9 @@ const state = {
   swapInputToken: "USDC",
   /** Slippage tolerance, basis points. 50 = 0.5%. */
   swapSlippageBps: 50,
+  /** Gateway-wide active model + selectable catalog from GET /v1/model.
+   *  { active: "<id>", models: [{ id, label, inputPerM, outputPerM }, ...] } */
+  model: null,
   /** Most recent /v1/usage/summary response. */
   usage: null,
   /** Pagination cursor for the "Recent calls" tab. */
@@ -1242,6 +1245,18 @@ async function loadPrice() {
   }
 }
 
+// GET /v1/model is PUBLIC (no auth) — fetch the gateway's active model and the
+// selectable catalog (9 models the operator's LiteLLM serves). Cached on state
+// so renderModel() can paint without re-fetching.
+async function loadModel() {
+  try {
+    const j = await apiJson("/v1/model");
+    state.model = j ?? null;
+  } catch (e) {
+    console.warn("loadModel failed", e);
+  }
+}
+
 async function loadCredits() {
   // Per-network spendable credits: pass the selected chain. Backends that are
   // not yet chain-aware ignore the query and return the single-chain balance.
@@ -1434,6 +1449,80 @@ function renderUsageOverview() {
   $("#usage-spent").textContent = fmtPton(u?.totalCostPton ?? 0n);
   $("#usage-cache-read").textContent = fmtNumber(u?.totalCacheReadTokens ?? 0);
   $("#usage-cache-write").textContent = fmtNumber(u?.totalCacheWriteTokens ?? 0);
+}
+
+// Render the gateway model picker — one selectable row per model showing its
+// label + per-1M input/output USD pricing, with the active one highlighted.
+// Clicking a row sets it as the gateway-wide active model (PUT /v1/model).
+function renderModel() {
+  const list = document.getElementById("model-list");
+  if (!list) return;
+  const m = state.model;
+  const models = Array.isArray(m?.models) ? m.models : [];
+  if (models.length === 0) {
+    list.innerHTML = `<p class="muted small">No models available.</p>`;
+    return;
+  }
+  const active = m?.active;
+  list.innerHTML = models
+    .map((mod) => {
+      const isActive = mod.id === active;
+      const inUsd = Number(mod.inputPerM);
+      const outUsd = Number(mod.outputPerM);
+      const inStr = Number.isFinite(inUsd) ? `$${inUsd.toFixed(2)}` : "—";
+      const outStr = Number.isFinite(outUsd) ? `$${outUsd.toFixed(2)}` : "—";
+      return (
+        `<button type="button" class="model-row${isActive ? " is-active" : ""}"` +
+        ` role="radio" aria-checked="${isActive ? "true" : "false"}"` +
+        ` data-model="${escape(String(mod.id))}">` +
+        `<span class="model-radio" aria-hidden="true"></span>` +
+        `<span class="model-meta">` +
+        `<span class="model-label">${escape(String(mod.label ?? mod.id))}</span>` +
+        `<span class="model-id">${escape(String(mod.id))}</span>` +
+        `</span>` +
+        `<span class="model-price">in ${inStr} /1M · out ${outStr} /1M</span>` +
+        `</button>`
+      );
+    })
+    .join("");
+}
+
+// PUT /v1/model { model: id } (authed — uses the bearer via apiJson), then
+// re-fetch + repaint the active highlight. Errors surface via #model-status.
+async function selectModel(id) {
+  if (!id || id === state.model?.active) return;
+  const status = document.getElementById("model-status");
+  const list = document.getElementById("model-list");
+  if (list) list.querySelectorAll(".model-row").forEach((b) => (b.disabled = true));
+  setStatus(status, "Switching model…");
+  try {
+    await apiJson("/v1/model", {
+      method: "PUT",
+      body: JSON.stringify({ model: id }),
+    });
+    await loadModel();
+    renderModel();
+    const label =
+      state.model?.models?.find((mm) => mm.id === state.model?.active)?.label ??
+      state.model?.active ??
+      id;
+    setStatus(status, `Active model set to ${label}.`, "ok");
+  } catch (e) {
+    setStatus(status, `Could not set model: ${e.message}`, "err");
+    if (list) list.querySelectorAll(".model-row").forEach((b) => (b.disabled = false));
+  }
+}
+
+// Delegated click handler — wired once at boot. Clicks on a model row set it
+// as the active gateway model.
+function wireModel() {
+  const list = document.getElementById("model-list");
+  if (!list) return;
+  list.addEventListener("click", (ev) => {
+    const row = ev.target.closest(".model-row");
+    if (!row || row.disabled) return;
+    void selectModel(row.getAttribute("data-model"));
+  });
 }
 
 function renderByDay() {
@@ -1725,9 +1814,11 @@ async function refreshAll() {
     loadUsage().catch(() => {}),
     loadWalletHoldings().catch(() => {}),
     loadOnChainCredits().catch(() => {}),
+    loadModel().catch(() => {}),
   ];
   await Promise.all(work);
   renderKpis();
+  renderModel();
   renderUsageOverview();
   renderByDay();
   renderByModel();
@@ -2983,6 +3074,7 @@ async function boot() {
   wireLogin();
   wireX402Config();
   wireX402Discover();
+  wireModel();
   void loadX402Status();
 
   state.session = loadSession();

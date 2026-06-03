@@ -25,21 +25,21 @@
  * provider returns it.
  */
 
-import { privateKeyToAccount } from "viem/accounts";
-import type { Address } from "viem";
-import { logger, type IAgentRuntime } from "@tokagentos/core";
+import { randomUUID } from "node:crypto";
 import {
+  type BillingDatabase,
   callLog,
+  commit as commitReservation,
   computeCharge,
   estimateInputTokens,
   estimateMaxCostUsd,
-  reserve,
   release,
-  commit as commitReservation,
+  reserve,
   usdToPton,
-  type BillingDatabase,
 } from "@tokagentos/billing";
-import { randomUUID } from "node:crypto";
+import { type IAgentRuntime, logger } from "@tokagentos/core";
+import type { Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 const log = logger.child({ src: "billing:model-wrap" });
 
@@ -86,7 +86,9 @@ function extractPromptText(params: unknown): string {
         if (Array.isArray(msg.content)) {
           return msg.content
             .map((c: unknown) =>
-              c && typeof c === "object" && "text" in (c as Record<string, unknown>)
+              c &&
+              typeof c === "object" &&
+              "text" in (c as Record<string, unknown>)
                 ? String((c as Record<string, unknown>).text ?? "")
                 : "",
             )
@@ -141,7 +143,9 @@ function resolveOperatorAddress(): Address | null {
   const pk = process.env.EVM_PRIVATE_KEY;
   if (!pk) return null;
   try {
-    const acc = privateKeyToAccount(pk.startsWith("0x") ? (pk as `0x${string}`) : `0x${pk}`);
+    const acc = privateKeyToAccount(
+      pk.startsWith("0x") ? (pk as `0x${string}`) : `0x${pk}`,
+    );
     cachedOperatorAddress = acc.address;
     return acc.address;
   } catch (err) {
@@ -168,6 +172,22 @@ export interface WrapModelDeps {
    * operator's configured chain is used for every billed model call.
    */
   chainId: number;
+  /**
+   * Optional resolver for the gateway-wide active model. When provided, the
+   * wrapper applies the active model to the agent's chat inference (best-effort)
+   * by overriding the concrete-model env vars the downstream OpenAI-compatible
+   * provider reads (OPENAI_SMALL_MODEL / OPENAI_LARGE_MODEL + generic
+   * SMALL_MODEL / LARGE_MODEL) BEFORE delegating to the original useModel.
+   *
+   * CAVEAT (see init.ts + README): the provider's `getSetting(runtime, key)`
+   * checks `runtime.getSetting(key)` (a boot-time snapshot) BEFORE
+   * `process.env[key]`. This override therefore only takes effect when those
+   * keys are NOT pinned in runtime settings — the typical scaffold case where
+   * chat is routed via OPENAI_BASE_URL=<gateway> with the model left to the
+   * provider default. When the keys ARE pinned in runtime settings, robust
+   * wiring requires an agent/app-core change (see the engineer's REPORT).
+   */
+  activeModelGetter?: () => string | null;
 }
 
 /**
@@ -208,6 +228,27 @@ export function wrapRuntimeUseModel(
       return await original.apply(this, args);
     }
 
+    // ---- Apply the gateway-wide active model (best-effort) ----
+    // The downstream OpenAI-compatible provider resolves the concrete model
+    // from OPENAI_{SMALL,LARGE}_MODEL (then generic {SMALL,LARGE}_MODEL). The
+    // provider IGNORES any per-call params.model, so the env vars are the only
+    // lever from inside the plugin. We set BOTH small+large to the single active
+    // model so whichever model-type the agent picks routes to it. See the
+    // caveat on WrapModelDeps.activeModelGetter for when this is effective.
+    if (deps.activeModelGetter) {
+      try {
+        const active = deps.activeModelGetter();
+        if (active) {
+          process.env.OPENAI_SMALL_MODEL = active;
+          process.env.OPENAI_LARGE_MODEL = active;
+          process.env.SMALL_MODEL = active;
+          process.env.LARGE_MODEL = active;
+        }
+      } catch {
+        // Never block chat on active-model resolution — fall through unmodified.
+      }
+    }
+
     const wallet = resolveOperatorAddress();
     const tonUsd = deps.tonUsdGetter();
     if (!wallet || tonUsd == null || tonUsd <= 0) {
@@ -224,9 +265,7 @@ export function wrapRuntimeUseModel(
     const promptTokens = approxTokens(promptText);
     // Default reservation envelope: assume 4096 output tokens at the
     // largest plausible per-token rate, capped at a sane USD ceiling.
-    const messages = promptText
-      ? [{ role: "user", content: promptText }]
-      : [];
+    const messages = promptText ? [{ role: "user", content: promptText }] : [];
     const maxCostUsd = estimateMaxCostUsd({
       model: "claude-haiku-4-5",
       inputTokens: Math.max(promptTokens, estimateInputTokens(messages)),
@@ -288,7 +327,11 @@ export function wrapRuntimeUseModel(
     });
 
     try {
-      await commitReservation(deps.db, reservation.reservationId, charge.totalPton);
+      await commitReservation(
+        deps.db,
+        reservation.reservationId,
+        charge.totalPton,
+      );
       await deps.db.insert(callLog).values({
         wallet,
         chainId: deps.chainId,
@@ -324,5 +367,7 @@ export function wrapRuntimeUseModel(
   };
 
   r.useModel = wrapped as typeof original;
-  log.info("runtime.useModel wrapped — chat-tab LLM calls now bill operator wallet");
+  log.info(
+    "runtime.useModel wrapped — chat-tab LLM calls now bill operator wallet",
+  );
 }

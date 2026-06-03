@@ -9,21 +9,21 @@
  * precision without precision loss from floating-point.
  */
 
+import { type InferInsertModel, type InferSelectModel, sql } from "drizzle-orm";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
-  pgTable,
-  pgEnum,
-  text,
-  uuid,
-  smallint,
+  customType,
+  index,
   integer,
   jsonb,
-  timestamp,
-  index,
+  pgEnum,
+  pgTable,
   primaryKey,
-  customType,
+  smallint,
+  text,
+  timestamp,
+  uuid,
 } from "drizzle-orm/pg-core";
-import { sql, type InferSelectModel, type InferInsertModel } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,8 @@ export const nullableNumericBigint = customType<{
 }>({
   dataType: () => "numeric(78, 0)",
   fromDriver: (value: string | null) => (value === null ? null : BigInt(value)),
-  toDriver: (value: bigint | null) => (value === null ? null : value.toString()),
+  toDriver: (value: bigint | null) =>
+    value === null ? null : value.toString(),
 });
 
 // The numeric(20,8) type for USD amounts (no bigint, keep as string for
@@ -423,6 +424,32 @@ export type CallLogRow = InferSelectModel<typeof callLog>;
 export type CallLogInsert = InferInsertModel<typeof callLog>;
 
 // ---------------------------------------------------------------------------
+// Table 9: billing_settings
+// ---------------------------------------------------------------------------
+
+/**
+ * Gateway-wide key/value settings (Phase: active-model selection).
+ *
+ * A tiny, deliberately generic store for singleton gateway configuration that
+ * has no natural home on a per-wallet/per-key table. The first consumer is the
+ * `active_model` key (the one model the gateway defaults external API-key
+ * requests to, and uses for agent chat inference). One row per key.
+ */
+export const billingSettings = pgTable("billing_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", {
+    withTimezone: true,
+    mode: "date",
+  })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type BillingSettingRow = InferSelectModel<typeof billingSettings>;
+export type BillingSettingInsert = InferInsertModel<typeof billingSettings>;
+
+// ---------------------------------------------------------------------------
 // Schema bundle and BillingDatabase union type (Decision D11)
 // ---------------------------------------------------------------------------
 
@@ -435,6 +462,7 @@ export const schema = {
   apiKeys,
   authNonces,
   callLog,
+  billingSettings,
   // Enums must be included for drizzle-kit to generate CREATE TYPE statements
   reservationOutcomeEnum,
   consumeBatchStateEnum,
@@ -449,6 +477,4 @@ export type Schema = typeof schema;
  * (tests). Both implement the same Drizzle query API so ledger functions work
  * unchanged in both environments. (Decision D11)
  */
-export type BillingDatabase =
-  | NodePgDatabase<Schema>
-  | PgliteDatabase<Schema>;
+export type BillingDatabase = NodePgDatabase<Schema> | PgliteDatabase<Schema>;

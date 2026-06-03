@@ -18,27 +18,57 @@
  *   - Calls `clearBillingState()` which closes the pool.
  */
 
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
-  schema,
+  type BillingDatabase,
   createBillingClients,
+  DEFAULT_ACTIVE_MODEL,
+  getActiveModel,
   loadBillingConfig,
+  schema,
 } from "@tokagentos/billing";
-import { logger, type IAgentRuntime } from "@tokagentos/core";
-import {
-  setBillingState,
-  clearBillingState,
-  isBillingStateInitialized,
-  getBillingState,
-} from "./state.js";
+import { type IAgentRuntime, logger } from "@tokagentos/core";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
 import { createGatewayProxy } from "./lib/gateway-proxy.js";
+import {
+  clearBillingState,
+  getBillingState,
+  isBillingStateInitialized,
+  setBillingState,
+} from "./state.js";
 
 const log = logger.child({ src: "billing:init" });
+
+// ---------------------------------------------------------------------------
+// Active-model cache (for the synchronous useModel-wrapper hot path)
+// ---------------------------------------------------------------------------
+//
+// getActiveModel(db) is async (a DB read), but the useModel wrapper needs a
+// synchronous getter. We hold a cached value, seed it at init, and refresh it
+// in the background (fire-and-forget) on each read so a PUT /v1/model is picked
+// up within one chat turn without blocking inference on a DB round-trip.
+let _cachedActiveModel: string = DEFAULT_ACTIVE_MODEL;
+let _activeModelRefreshing = false;
+
+function refreshActiveModelCache(db: BillingDatabase): void {
+  if (_activeModelRefreshing) return;
+  _activeModelRefreshing = true;
+  void getActiveModel(db)
+    .then((m) => {
+      _cachedActiveModel = m;
+    })
+    .catch(() => {
+      // Keep the last cached value on failure — getActiveModel already
+      // falls back to the default internally, so this is belt-and-braces.
+    })
+    .finally(() => {
+      _activeModelRefreshing = false;
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Known BILLING_* keys — read from runtime settings and forwarded to
@@ -108,9 +138,8 @@ function buildEnv(runtime: IAgentRuntime): NodeJS.ProcessEnv {
     // env writes, which would silently leave BILLING_ENABLED stuck at its
     // boot-time value (false) even after the wizard succeeds.
     const procVal = process.env[k];
-    const val = procVal !== undefined && procVal !== ""
-      ? procVal
-      : runtime.getSetting(k);
+    const val =
+      procVal !== undefined && procVal !== "" ? procVal : runtime.getSetting(k);
     if (val !== null && val !== undefined) {
       env[k] = String(val);
     }
@@ -262,8 +291,14 @@ export async function initBillingPlugin(runtime: IAgentRuntime): Promise<void> {
   // external-API-key middleware lives. Wrap useModel here so every text
   // generation funnels through reserve/commit + call_log, populating the
   // Usage tab with chat activity.
+  // Seed the active-model cache so the very first chat turn already routes to
+  // the persisted active model (not just the default).
+  refreshActiveModelCache(db);
+
   try {
-    const { wrapRuntimeUseModel } = await import("./middleware/model-billing-wrapper.js");
+    const { wrapRuntimeUseModel } = await import(
+      "./middleware/model-billing-wrapper.js"
+    );
     wrapRuntimeUseModel(runtime, {
       db,
       marginBps: config.marginBps,
@@ -273,10 +308,19 @@ export async function initBillingPlugin(runtime: IAgentRuntime): Promise<void> {
       tonUsdGetter: () => {
         try {
           const state = getBillingState();
-          return state.twapCache?.get()?.tonUsd ?? state.config.fixedTonUsd ?? null;
+          return (
+            state.twapCache?.get()?.tonUsd ?? state.config.fixedTonUsd ?? null
+          );
         } catch {
           return null;
         }
+      },
+      // Gateway-wide active model → agent chat inference (best-effort). The
+      // getter returns the cached value synchronously and kicks off a
+      // background refresh so a PUT /v1/model is reflected within one turn.
+      activeModelGetter: () => {
+        refreshActiveModelCache(db);
+        return _cachedActiveModel;
       },
     });
   } catch (err) {

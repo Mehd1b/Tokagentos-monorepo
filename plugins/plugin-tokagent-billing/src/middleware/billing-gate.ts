@@ -18,26 +18,28 @@
  * Ported from llm-api-gateway/proxy/src/handleMessages.ts (reserve portion).
  */
 
-import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { Address } from "viem";
+import type { IncomingMessage } from "node:http";
 import { logger } from "@tokagentos/core";
+import type { Address } from "viem";
 
 const log = logger.child({ src: "billing:gate" });
+
 import {
   assertSupportedModel,
-  normalizeModelId,
+  type BillingDatabase,
+  callLog,
+  commit,
+  computeCharge,
+  detectCacheControl,
   estimateInputTokens,
   estimateMaxCostUsd,
-  detectCacheControl,
-  usdToPton,
-  computeCharge,
-  reserve,
+  getActiveModel,
+  normalizeModelId,
   release,
-  commit,
-  callLog,
-  TwapCache,
-  type BillingDatabase,
+  reserve,
+  type TwapCache,
+  usdToPton,
 } from "@tokagentos/billing";
 import { getBillingState, getServerBillingState } from "../state.js";
 import { resolveBillingIdentity } from "./api-key-resolve.js";
@@ -108,10 +110,14 @@ function extractModel(body: unknown): string | null {
 }
 
 /** Extract message array from body (supports both OpenAI and Anthropic shapes). */
-function extractMessages(body: unknown): Array<{ role: string; content: unknown }> {
+function extractMessages(
+  body: unknown,
+): Array<{ role: string; content: unknown }> {
   if (typeof body !== "object" || body === null) return [];
   const msgs = (body as Record<string, unknown>).messages;
-  return Array.isArray(msgs) ? (msgs as Array<{ role: string; content: unknown }>) : [];
+  return Array.isArray(msgs)
+    ? (msgs as Array<{ role: string; content: unknown }>)
+    : [];
 }
 
 function extractTools(body: unknown): unknown[] | undefined {
@@ -183,18 +189,18 @@ export async function applyBillingGate(
   const chainId = identity.chainId ?? config.chainId;
 
   // ---- 2. Detect and validate model ----
-  const rawModel = extractModel(body);
+  // When the client omits `model`, default to the gateway-wide active model
+  // (getActiveModel — "glm-4.7" when unset). We inject the resolved id back
+  // INTO the request body so the downstream LiteLLM forwarder sends it too;
+  // the proxy forwards the same `body` object we mutate here. When the client
+  // DID specify a model, we keep theirs (and the allowlist check still runs).
+  let rawModel = extractModel(body);
   if (!rawModel) {
-    return {
-      allow: false,
-      status: 400,
-      reason: "unsupported_model",
-      body: {
-        type: "billing_error",
-        code: "missing_model",
-        message: 'request body missing required "model" field',
-      },
-    };
+    const active = await getActiveModel(db);
+    rawModel = active;
+    if (body && typeof body === "object") {
+      (body as Record<string, unknown>).model = active;
+    }
   }
   let model: string;
   try {
@@ -252,7 +258,12 @@ export async function applyBillingGate(
   const requestId = randomUUID();
 
   // ---- 6. Attempt to reserve ----
-  const result = await reserve(db, { wallet, chainId, amount: maxPton, requestId });
+  const result = await reserve(db, {
+    wallet,
+    chainId,
+    amount: maxPton,
+    requestId,
+  });
   if (!result.ok) {
     return {
       allow: false,
@@ -281,7 +292,11 @@ export async function applyBillingGate(
     actualUsd: number,
     params?: BillingCommitParams,
   ): Promise<void> => {
-    const charge = computeCharge({ actualUsd, tonUsd, marginBps: effectiveMarginBps });
+    const charge = computeCharge({
+      actualUsd,
+      tonUsd,
+      marginBps: effectiveMarginBps,
+    });
     await commit(db, reservationId, charge.totalPton);
 
     if (params) {

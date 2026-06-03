@@ -332,6 +332,24 @@
         </article>
       </section>
 
+      <!-- ---- Active model ---- -->
+      <section class="card section-card" id="model-card">
+        <header class="card-header">
+          <div>
+            <div class="card-eyebrow">Inference</div>
+            <h2 class="card-title">Model</h2>
+          </div>
+          <span class="card-tag">Gateway-wide · default for API keys + chat</span>
+        </header>
+        <p class="muted small model-intro">
+          One active model serves the whole gateway. It is the default for external
+          API-key calls that omit a <code>model</code>, drives the agent chat, and is
+          shown next to the agent name in chat.
+        </p>
+        <div id="model-list" class="model-list" role="radiogroup" aria-label="Active gateway model"></div>
+        <p id="model-status" class="status-line" role="status" aria-live="polite"></p>
+      </section>
+
       <!-- ---- Usage tabs ---- -->
       <section class="card section-card">
         <header class="card-header card-header-stack">

@@ -16,20 +16,23 @@
 import { PRICING } from "./rates.js";
 
 /**
- * The 9 selectable models, in display order. These are the models Tokamak's
- * LiteLLM serves (see https://api.ai.tokamak.network/v1/models). The first
- * entry is NOT the default — `DEFAULT_ACTIVE_MODEL` is the canonical default.
+ * The selectable models, in display order — the subset of Tokamak's LiteLLM
+ * lineup verified to actually serve chat completions (tested directly against
+ * https://api.ai.tokamak.network/v1/chat/completions). Models the LiteLLM
+ * *lists* but that 404 / time out / error on a real call are intentionally
+ * excluded:
+ *   - gemini-3-pro, gemini-3-flash → deprecated upstream (Google "no longer
+ *     available"); use gemini-3.1-pro instead.
+ *   - qwen3-235b, minimax-m2.5, minimax-m2.5-slow, deepseek-v3.2 → unresponsive
+ *     / connection error at the LiteLLM as of last probe.
+ * Re-add an id here only once it serves a real completion. The first entry is
+ * NOT the default — `DEFAULT_ACTIVE_MODEL` is the canonical default.
  */
 export const SELECTABLE_MODELS = [
-  "gemini-3-flash",
-  "gemini-3-pro",
-  "gpt-5.2-pro",
-  "gpt-5.2",
   "glm-4.7",
-  "qwen3-235b",
-  "minimax-m2.5",
-  "minimax-m2.5-slow",
-  "deepseek-v3.2",
+  "gpt-5.2",
+  "gpt-5.2-pro",
+  "gemini-3.1-pro",
 ] as const;
 
 export type SelectableModel = (typeof SELECTABLE_MODELS)[number];
@@ -51,15 +54,10 @@ export function isSelectableModel(model: string): boolean {
  * `SELECTABLE_MODELS` never silently produces an empty label.
  */
 const MODEL_LABELS: Record<string, string> = {
-  "gemini-3-flash": "Gemini 3 Flash",
-  "gemini-3-pro": "Gemini 3 Pro",
-  "gpt-5.2-pro": "GPT-5.2 Pro",
-  "gpt-5.2": "GPT-5.2",
   "glm-4.7": "GLM 4.7",
-  "qwen3-235b": "Qwen3 235B",
-  "minimax-m2.5": "MiniMax M2.5",
-  "minimax-m2.5-slow": "MiniMax M2.5 Slow",
-  "deepseek-v3.2": "DeepSeek V3.2",
+  "gpt-5.2": "GPT-5.2",
+  "gpt-5.2-pro": "GPT-5.2 Pro",
+  "gemini-3.1-pro": "Gemini 3.1 Pro",
 };
 
 function labelFor(id: string): string {

@@ -128,7 +128,7 @@ describe("GET /v1/model", () => {
       }>;
     };
     expect(body.active).toBe("glm-4.7");
-    expect(body.models).toHaveLength(9);
+    expect(body.models).toHaveLength(4);
     const glm = body.models.find((m) => m.id === "glm-4.7");
     expect(glm).toEqual({
       id: "glm-4.7",
@@ -179,15 +179,15 @@ describe("PUT /v1/model", () => {
   it("sets a valid model and GET reflects it", async () => {
     const putRes = makeRes();
     await putHandler(
-      makeReqWithWallet({ body: { model: "minimax-m2.5" } }),
+      makeReqWithWallet({ body: { model: "gemini-3.1-pro" } }),
       putRes,
       fakeRuntime,
     );
     expect(putRes.statusCode).toBe(200);
-    expect((putRes.body as { active: string }).active).toBe("minimax-m2.5");
+    expect((putRes.body as { active: string }).active).toBe("gemini-3.1-pro");
 
     const getRes = makeRes();
     await getHandler({} as RouteRequest, getRes, fakeRuntime);
-    expect((getRes.body as { active: string }).active).toBe("minimax-m2.5");
+    expect((getRes.body as { active: string }).active).toBe("gemini-3.1-pro");
   });
 });

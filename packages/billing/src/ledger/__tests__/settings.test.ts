@@ -43,8 +43,8 @@ describe("active model setting", () => {
     await setActiveModel(handle.db, "gpt-5.2");
     expect(await getActiveModel(handle.db)).toBe("gpt-5.2");
     // Upsert (not duplicate insert) on a second write.
-    await setActiveModel(handle.db, "gemini-3-pro");
-    expect(await getActiveModel(handle.db)).toBe("gemini-3-pro");
+    await setActiveModel(handle.db, "gemini-3.1-pro");
+    expect(await getActiveModel(handle.db)).toBe("gemini-3.1-pro");
   });
 
   it("rejects an unknown model", async () => {
@@ -52,7 +52,7 @@ describe("active model setting", () => {
       setActiveModel(handle.db, "not-a-real-model"),
     ).rejects.toThrow();
     // Unchanged after a rejected write.
-    expect(await getActiveModel(handle.db)).toBe("gemini-3-pro");
+    expect(await getActiveModel(handle.db)).toBe("gemini-3.1-pro");
   });
 
   it("falls back to default when a stored value is no longer selectable", async () => {
@@ -67,8 +67,8 @@ describe("active model setting", () => {
 });
 
 describe("model catalog", () => {
-  it("lists exactly the 9 selectable models in order", () => {
-    expect(SELECTABLE_MODELS).toHaveLength(9);
+  it("lists exactly the 4 selectable models in order", () => {
+    expect(SELECTABLE_MODELS).toHaveLength(4);
     const catalog = buildModelCatalog();
     expect(catalog.map((m) => m.id)).toEqual([...SELECTABLE_MODELS]);
   });

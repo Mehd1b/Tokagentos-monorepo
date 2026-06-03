@@ -314,6 +314,7 @@ const BILLING_PUBLIC_V1_ROOTS = [
   "/v1/messages", // /v1/messages (LiteLLM proxy) + /v1/messages/count_tokens
   "/v1/chat", // /v1/chat/completions (OpenAI shape, used by plugin-openai)
   "/v1/models", // OpenAI-compatible model catalog (plugin-openai validates against this)
+  "/v1/model", // gateway-wide active-model GET (public read) + PUT (plugin-side auth). Distinct from /v1/models; startsWith("/v1/model/") never matches "/v1/models".
   "/v1/stats",
   "/v1/quote", // /v1/quote/:id
 ];

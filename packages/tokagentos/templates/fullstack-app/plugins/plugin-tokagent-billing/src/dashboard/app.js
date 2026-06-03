@@ -73,6 +73,56 @@ function chainMeta(id) {
   return CHAINS.find((c) => c.id === Number(id)) ?? CHAINS[0];
 }
 
+// ---- Per-chain brand identity ----------------------------------------------
+// Keyed by chainId. Each entry carries the chain's brand accent colour and an
+// inline brand-logo SVG (string, so we never depend on a sprite/CDN at boot).
+//   1    = Ethereum mainnet — ETH diamond mark, brand purple #627EEA
+//   8453 = Base             — Base blue circle mark, brand blue   #0052FF
+// `chainLogo()` falls back to a neutral dot glyph for any unknown chain so a
+// custom/local network still renders an intentional button.
+const CHAIN_LOGOS = {
+  1: {
+    color: "#627EEA",
+    // Ethereum diamond. Two-tone faces mirror the canonical ETH mark.
+    logo:
+      '<svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">' +
+      '<g fill="none" fill-rule="evenodd">' +
+      '<circle cx="16" cy="16" r="16" fill="#627EEA"/>' +
+      '<path fill="#FFF" fill-opacity="0.602" d="M16.498 4v8.87l7.497 3.35z"/>' +
+      '<path fill="#FFF" d="M16.498 4L9 16.22l7.498-3.35z"/>' +
+      '<path fill="#FFF" fill-opacity="0.602" d="M16.498 21.968v6.027L24 17.616z"/>' +
+      '<path fill="#FFF" d="M16.498 27.995v-6.028L9 17.616z"/>' +
+      '<path fill="#FFF" fill-opacity="0.2" d="M16.498 20.573l7.497-4.353-7.497-3.348z"/>' +
+      '<path fill="#FFF" fill-opacity="0.602" d="M9 16.22l7.498 4.353v-7.701z"/>' +
+      '</g></svg>',
+  },
+  8453: {
+    color: "#0052FF",
+    // Base — blue circle with the central "open" cut, brand blue #0052FF.
+    logo:
+      '<svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">' +
+      '<circle cx="16" cy="16" r="16" fill="#0052FF"/>' +
+      '<path fill="#FFF" d="M15.93 27.2c6.197 0 11.22-5.018 11.22-11.207 ' +
+      'C27.15 9.803 22.127 4.785 15.93 4.785c-5.88 0-10.703 4.52-11.18 ' +
+      '10.27h14.81v1.89H4.75C5.227 22.68 10.05 27.2 15.93 27.2z"/>' +
+      '</svg>',
+  },
+};
+
+/** Brand identity for a chainId — {color, logo} with a neutral fallback. */
+function chainLogo(id) {
+  const entry = CHAIN_LOGOS[Number(id)];
+  if (entry) return entry;
+  return {
+    color: "var(--accent)",
+    logo:
+      '<svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">' +
+      '<circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2"/>' +
+      '<circle cx="16" cy="16" r="4" fill="currentColor"/>' +
+      "</svg>",
+  };
+}
+
 const SELECTED_CHAIN_KEY = "ai-proxy-dashboard:selectedChainId";
 
 /** Persisted-or-default selected network. Persisting across reloads avoids
@@ -394,14 +444,12 @@ async function ensureChain(meta = chainMeta(state.selectedChainId)) {
 /** Render the chain pill in the topbar — green ✓ if on the right chain. */
 async function refreshChainPill() {
   const pill = document.getElementById("chain-pill");
-  const idEl = document.getElementById("chain-id");
   const nameEl = document.getElementById("chain-name");
-  if (!pill || !idEl || !state.provider) return;
+  if (!pill || !state.provider) return;
   try {
     const meta = chainMeta(state.selectedChainId);
     const current = await state.provider.request({ method: "eth_chainId" });
     const ok = typeof current === "string" && current.toLowerCase() === meta.idHex.toLowerCase();
-    idEl.textContent = current ?? "—";
     if (nameEl) nameEl.textContent = ok ? meta.name : `switch to ${meta.name}`;
     pill.classList.toggle("pill-ok", ok);
     pill.classList.toggle("pill-warn", !ok);
@@ -1315,7 +1363,7 @@ async function loadCalls(reset = false) {
   if (state.callsCursor) q.set("cursor", String(state.callsCursor));
   const j = await apiJson(`/v1/usage/calls?${q.toString()}`);
   state.callsCursor = j.nextCursor ?? null;
-  state.callsLoaded += j.items.length;
+  state.callsLoaded += j.calls.length;
   return j;
 }
 
@@ -1325,12 +1373,10 @@ function renderTopBar() {
   const pill = $("#wallet-pill");
   const addr = $("#wallet-addr");
   const chain = $("#chain-pill");
-  const chainId = $("#chain-id");
   const logout = $("#logout-btn");
   if (state.session?.wallet) {
     addr.textContent = fmtAddr(state.session.wallet);
     pill.hidden = false;
-    chainId.textContent = "0x" + Number(state.selectedChainId).toString(16);
     chain.hidden = false;
     logout.hidden = false;
   } else {
@@ -1373,12 +1419,6 @@ function renderKpis() {
   $("#kpi-price-source").textContent = state.priceSnap?.source ?? "—";
   $("#kpi-price-age").textContent = fmtAge(state.priceSnap?.ageMs ?? null);
 
-  const u = state.usage;
-  $("#kpi-calls").textContent = fmtNumber(u?.calls ?? 0);
-  $("#kpi-calls-ok").textContent = fmtNumber(u?.successCalls ?? 0);
-  $("#kpi-calls-fail").textContent = fmtNumber(u?.failedCalls ?? 0);
-  $("#usage-retention").textContent = String(u?.retentionDays ?? "90");
-
   // Sync swap card balance hint whenever wallet balances refresh.
   renderSwapPreview();
   // Refresh the on-chain L1/L2 TON balances shown in the bridge panel.
@@ -1391,7 +1431,7 @@ function renderUsageOverview() {
   const u = state.usage;
   $("#usage-input").textContent = fmtNumber(u?.totalInputTokens ?? 0);
   $("#usage-output").textContent = fmtNumber(u?.totalOutputTokens ?? 0);
-  $("#usage-spent").textContent = fmtPton(u?.totalActualPton ?? 0n);
+  $("#usage-spent").textContent = fmtPton(u?.totalCostPton ?? 0n);
   $("#usage-cache-read").textContent = fmtNumber(u?.totalCacheReadTokens ?? 0);
   $("#usage-cache-write").textContent = fmtNumber(u?.totalCacheWriteTokens ?? 0);
 }
@@ -1416,7 +1456,7 @@ function renderByModel() {
       <td class="num">${fmtNumber(r.calls)}</td>
       <td class="num">${fmtNumber(r.inputTokens)}</td>
       <td class="num">${fmtNumber(r.outputTokens)}</td>
-      <td class="num">${fmtPton(r.actualPton)}</td>
+      <td class="num">${fmtPton(r.costPton)}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -1443,11 +1483,11 @@ async function renderByKey() {
     tr.innerHTML = `
       <td><code>${escape(idLabel)}</code></td>
       <td>${escape(nameLabel)}</td>
-      <td class="num">${fmtNumber(r.calls)}</td>
-      <td class="num">${fmtNumber(r.inputTokens)}</td>
-      <td class="num">${fmtNumber(r.outputTokens)}</td>
-      <td class="num">${fmtPton(r.actualPton)}</td>
-      <td>${fmtTimestamp(r.lastUsedAt)}</td>
+      <td class="num">${fmtNumber(r.callCount)}</td>
+      <td class="num">${fmtNumber(r.totalInputTokens)}</td>
+      <td class="num">${fmtNumber(r.totalOutputTokens)}</td>
+      <td class="num">${fmtPton(r.totalCostPton)}</td>
+      <td>—</td>
     `;
     tbody.appendChild(tr);
   }
@@ -1462,9 +1502,12 @@ function renderCallsRows(items, append) {
   }
   for (const r of items) {
     const tr = document.createElement("tr");
-    const outcomeClass = r.outcome.startsWith("success")
+    // /v1/usage/calls rows report `status` ∈ {"ok","error","aborted"}. Guard
+    // against an undefined/unknown status so a malformed row can't throw.
+    const status = typeof r.status === "string" ? r.status : "";
+    const outcomeClass = status === "ok"
       ? "outcome-success"
-      : r.outcome === "upstream_failed" || r.outcome.startsWith("upstream_")
+      : status === "error"
         ? "outcome-failed"
         : "outcome-other";
     tr.innerHTML = `
@@ -1473,8 +1516,8 @@ function renderCallsRows(items, append) {
       <td><code>${escape(r.apiKeyId ?? "session")}</code></td>
       <td class="num">${fmtNumber(r.inputTokens)}</td>
       <td class="num">${fmtNumber(r.outputTokens)}</td>
-      <td class="num">${fmtPton(r.actualPton)}</td>
-      <td><span class="outcome-pill ${outcomeClass}">${escape(r.outcome)}</span></td>
+      <td class="num">${fmtPton(r.costPton)}</td>
+      <td><span class="outcome-pill ${outcomeClass}">${escape(status || "—")}</span></td>
     `;
     tbody.appendChild(tr);
   }
@@ -1693,7 +1736,7 @@ async function refreshAll() {
   // Calls is paginated and lazy — only initial page.
   try {
     const page = await loadCalls(true);
-    renderCallsRows(page.items, false);
+    renderCallsRows(page.calls, false);
   } catch (e) {
     console.warn("loadCalls failed", e);
   }
@@ -1734,8 +1777,12 @@ function wireTopupPresets() {
   $("#topup-amount").addEventListener("input", updateTopupUsd);
 }
 
-// Global network switcher (topbar). Populates the <select> from CONFIG.CHAINS
-// and stays hidden when the gateway advertises a single chain (legacy mode).
+// Global network switcher (topbar). Renders a polished network BUTTON showing
+// the selected chain's brand logo + name + accent, with a logo dropdown. The
+// hidden native <select> (#network-select) is the source of truth for behavior:
+// the custom UI writes back to it and dispatches `change`, so the existing
+// wireNetworkSwitcher() handler (persist + refresh) stays untouched. Stays
+// hidden when the gateway advertises a single chain (legacy mode).
 function renderNetworkSwitcher() {
   const sel = document.getElementById("network-select");
   const wrap = document.getElementById("network-switch");
@@ -1745,7 +1792,8 @@ function renderNetworkSwitcher() {
     return;
   }
   if (wrap) wrap.hidden = false;
-  // Build options once; afterwards just keep the selection in sync.
+
+  // Build the hidden native <select> options once.
   if (sel.options.length !== CHAINS.length) {
     sel.innerHTML = "";
     for (const c of CHAINS) {
@@ -1756,6 +1804,59 @@ function renderNetworkSwitcher() {
     }
   }
   sel.value = String(state.selectedChainId);
+
+  // Build the custom dropdown menu once (logo + name + per-chain accent dot).
+  const menu = document.getElementById("network-menu");
+  if (menu && menu.childElementCount !== CHAINS.length) {
+    menu.innerHTML = "";
+    for (const c of CHAINS) {
+      const brand = chainLogo(c.id);
+      const opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = "network-option";
+      opt.setAttribute("role", "option");
+      opt.setAttribute("data-chain", String(c.id));
+      opt.style.setProperty("--chain-accent", brand.color);
+      opt.innerHTML =
+        `<span class="network-option-logo" aria-hidden="true">${brand.logo}</span>` +
+        `<span class="network-option-name">${escape(c.name)}</span>` +
+        `<span class="network-option-check" aria-hidden="true"></span>`;
+      menu.appendChild(opt);
+    }
+  }
+
+  // Sync the visible button + the active row to the selected chain.
+  const meta = chainMeta(state.selectedChainId);
+  const brand = chainLogo(state.selectedChainId);
+  const wrapEl = document.getElementById("network-switch");
+  if (wrapEl) wrapEl.style.setProperty("--chain-accent", brand.color);
+  const logoEl = document.getElementById("network-button-logo");
+  const nameEl = document.getElementById("network-button-name");
+  if (logoEl) logoEl.innerHTML = brand.logo;
+  if (nameEl) nameEl.textContent = meta.name;
+  if (menu) {
+    for (const opt of menu.querySelectorAll(".network-option")) {
+      const active = Number(opt.getAttribute("data-chain")) === state.selectedChainId;
+      opt.classList.toggle("is-active", active);
+      opt.setAttribute("aria-selected", active ? "true" : "false");
+    }
+  }
+}
+
+function openNetworkMenu() {
+  const menu = document.getElementById("network-menu");
+  const btn = document.getElementById("network-button");
+  if (!menu || !btn) return;
+  menu.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
+}
+
+function closeNetworkMenu() {
+  const menu = document.getElementById("network-menu");
+  const btn = document.getElementById("network-button");
+  if (!menu || !btn) return;
+  menu.hidden = true;
+  btn.setAttribute("aria-expanded", "false");
 }
 
 // Swap routes through TON's Ethereum liquidity (no DEX pool for the Base PTON),
@@ -1911,6 +2012,39 @@ function wireBridge() {
 function wireNetworkSwitcher() {
   const sel = document.getElementById("network-select");
   if (!sel) return;
+
+  // Custom button + dropdown. Selecting an option just writes the value into
+  // the native <select> and fires its `change` event so the single handler
+  // below performs the persist + chain switch + refresh.
+  const btn = document.getElementById("network-button");
+  const menu = document.getElementById("network-menu");
+  if (btn && menu) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (menu.hidden) openNetworkMenu();
+      else closeNetworkMenu();
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeNetworkMenu();
+    });
+    menu.addEventListener("click", (e) => {
+      const opt = e.target.closest ? e.target.closest(".network-option") : null;
+      if (!opt) return;
+      e.stopPropagation();
+      const id = Number(opt.getAttribute("data-chain"));
+      closeNetworkMenu();
+      if (!id || id === state.selectedChainId) return;
+      sel.value = String(id);
+      sel.dispatchEvent(new Event("change"));
+    });
+    // Click-away closes the menu.
+    document.addEventListener("click", (e) => {
+      if (menu.hidden) return;
+      const within = e.target.closest && e.target.closest("#network-switch");
+      if (!within) closeNetworkMenu();
+    });
+  }
+
   sel.addEventListener("change", async () => {
     const id = Number(sel.value);
     if (!id || id === state.selectedChainId) return;
@@ -2484,7 +2618,7 @@ function wireCallsPager() {
     $("#calls-load-more").disabled = true;
     try {
       const page = await loadCalls(false);
-      renderCallsRows(page.items, true);
+      renderCallsRows(page.calls, true);
     } catch (e) {
       $("#calls-status").textContent = `Load failed: ${e.message}`;
     }
@@ -2512,8 +2646,8 @@ function wireSwitchChain() {
       await refreshChainPill();
     } catch (e) {
       // Surface the failure on the topbar pill so the user knows why.
-      const idEl = document.getElementById("chain-id");
-      if (idEl) idEl.title = e.message;
+      const nameEl = document.getElementById("chain-name");
+      if (nameEl) nameEl.title = e.message;
       console.error("[dashboard] manual switch failed", e);
       alert(`Network switch failed: ${e.message}`);
     } finally {

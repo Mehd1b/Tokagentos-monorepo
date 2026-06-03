@@ -105,9 +105,16 @@ function parseTimeWindow(
  *   "window": { "since": "...", "until": "..." },
  *   "totalInputTokens": 12345,
  *   "totalOutputTokens": 6789,
+ *   "totalCacheReadTokens": 100,
+ *   "totalCacheWriteTokens": 50,
  *   "totalCostUsd": "0.05000000",
  *   "totalCostPton": "1000000000000000",
- *   "callCount": 42
+ *   "callCount": 42,
+ *   "byDay": [ { "day": "2026-05-01", "calls": 10 } ],
+ *   "byModel": [
+ *     { "model": "...", "calls": 30, "inputTokens": 9000,
+ *       "outputTokens": 4000, "costPton": "700000000000000" }
+ *   ]
  * }
  * ```
  */
@@ -135,34 +142,77 @@ async function handleUsageSummary(
   const { sinceDate, untilDate } = window;
   const walletKey = (identity.wallet as string).toLowerCase();
 
+  // Shared wallet + time-window filter, reused across the aggregate,
+  // per-day, and per-model queries below.
+  const windowFilter = and(
+    eq(callLog.wallet, walletKey),
+    gte(callLog.ts, sinceDate),
+    lt(callLog.ts, untilDate),
+  );
+
   // Aggregate query on billing_call_log.
   const rows = await db
     .select({
       totalInputTokens: sum(callLog.inputTokens),
       totalOutputTokens: sum(callLog.outputTokens),
+      totalCacheReadTokens: sum(callLog.cacheInputTokens),
+      totalCacheWriteTokens: sum(callLog.cacheCreationTokens),
       totalCostUsd: sum(callLog.costUsd),
       totalCostPton: sum(callLog.costPton),
       callCount: count(),
     })
     .from(callLog)
-    .where(
-      and(
-        eq(callLog.wallet, walletKey),
-        gte(callLog.ts, sinceDate),
-        lt(callLog.ts, untilDate),
-      ),
-    );
+    .where(windowFilter);
 
   const row = rows[0];
+
+  // Per-day call counts (calendar day of `ts`, ascending).
+  const dayExpr = sql<string>`to_char(date_trunc('day', ${callLog.ts}), 'YYYY-MM-DD')`;
+  const dayRows = await db
+    .select({
+      day: dayExpr,
+      calls: count(),
+    })
+    .from(callLog)
+    .where(windowFilter)
+    .groupBy(dayExpr)
+    .orderBy(sql`${dayExpr} ASC`);
+
+  // Per-model breakdown (ordered by call count desc).
+  const modelRows = await db
+    .select({
+      model: callLog.model,
+      calls: count(),
+      inputTokens: sum(callLog.inputTokens),
+      outputTokens: sum(callLog.outputTokens),
+      costPton: sum(callLog.costPton),
+    })
+    .from(callLog)
+    .where(windowFilter)
+    .groupBy(callLog.model)
+    .orderBy(sql`${count()} DESC`);
 
   res.status(200).json({
     wallet: identity.wallet,
     window: { since: sinceDate.toISOString(), until: untilDate.toISOString() },
     totalInputTokens: Number(row?.totalInputTokens ?? 0),
     totalOutputTokens: Number(row?.totalOutputTokens ?? 0),
+    totalCacheReadTokens: Number(row?.totalCacheReadTokens ?? 0),
+    totalCacheWriteTokens: Number(row?.totalCacheWriteTokens ?? 0),
     totalCostUsd: row?.totalCostUsd ?? "0.00000000",
     totalCostPton: row?.totalCostPton?.toString() ?? "0",
     callCount: Number(row?.callCount ?? 0),
+    byDay: dayRows.map((d) => ({
+      day: d.day,
+      calls: Number(d.calls ?? 0),
+    })),
+    byModel: modelRows.map((m) => ({
+      model: m.model,
+      calls: Number(m.calls ?? 0),
+      inputTokens: Number(m.inputTokens ?? 0),
+      outputTokens: Number(m.outputTokens ?? 0),
+      costPton: m.costPton?.toString() ?? "0",
+    })),
   });
 }
 

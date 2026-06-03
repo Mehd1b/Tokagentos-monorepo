@@ -5,7 +5,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Clock3,
-  CreditCard,
+  Coins,
   Gamepad2,
   MessageSquare,
   Monitor,
@@ -145,7 +145,7 @@ export const ALL_TAB_GROUPS: TabGroup[] = [
   {
     label: "Billing",
     tabs: ["billing"],
-    icon: CreditCard,
+    icon: Coins,
     description: "Credits, top-up, API keys, and usage",
   },
 ];

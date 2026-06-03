@@ -68,14 +68,23 @@
       </div>
     </div>
     <div class="topbar-right">
-      <label class="network-switch" id="network-switch" hidden>
-        <span class="network-switch-label">Network</span>
-        <select id="network-select" class="network-select" aria-label="Active network"></select>
-      </label>
+      <div class="network-switch" id="network-switch" hidden>
+        <!-- Native <select> kept for behavior + a11y, visually hidden. The
+             custom button/dropdown below mirrors it (logo + name + accent) and
+             writes back to it via a dispatched `change` event so the existing
+             wireNetworkSwitcher() handler stays untouched. -->
+        <select id="network-select" class="network-select-native" aria-label="Active network"></select>
+        <button id="network-button" class="network-button" type="button"
+                aria-haspopup="listbox" aria-expanded="false" aria-label="Active network">
+          <span class="network-button-logo" id="network-button-logo" aria-hidden="true"></span>
+          <span class="network-button-name" id="network-button-name">—</span>
+          <svg class="network-button-caret" width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="network-menu" id="network-menu" role="listbox" hidden></div>
+      </div>
       <span id="chain-pill" class="pill" hidden>
         <span class="dot" aria-hidden="true"></span>
         <span id="chain-name">—</span>
-        <code id="chain-id" class="pill-mono">—</code>
       </span>
       <button id="switch-chain-btn" class="btn btn-ghost btn-small" type="button" hidden>Switch network</button>
       <span id="wallet-pill" class="pill pill-wallet" hidden>
@@ -157,26 +166,6 @@
             <div class="stat-label">Wallet ETH</div>
             <div class="stat-num"><span id="kpi-wallet-eth">—</span></div>
           </div>
-        </div>
-      </section>
-
-      <!-- ---- KPI strip ---- -->
-      <section class="kpi-strip">
-        <div class="kpi">
-          <div class="kpi-label">Calls (30d)</div>
-          <div class="kpi-val"><span id="kpi-calls">—</span></div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Success</div>
-          <div class="kpi-val ok"><span id="kpi-calls-ok">—</span></div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Failed</div>
-          <div class="kpi-val err"><span id="kpi-calls-fail">—</span></div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Retention</div>
-          <div class="kpi-val muted"><span id="usage-retention">90</span><span class="kpi-unit">d</span></div>
         </div>
       </section>
 

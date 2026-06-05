@@ -21,9 +21,12 @@ export function ServiceDirectory({
             per-request in PTON.
           </div>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm">
-          Browse all 240 ↗
-        </button>
+        <span
+          className="chip mute"
+          title="The service registry backend is not live yet — sample services shown."
+        >
+          ⟩ preview · backend coming
+        </span>
       </div>
 
       <div className="svc-table">
@@ -49,7 +52,12 @@ export function ServiceDirectory({
               <span style={{ color: "var(--muted)", fontSize: 10 }}>PTON</span>
             </span>
             <span className="svc-latency">{s.latency}</span>
-            <button type="button" className="btn btn-ghost btn-sm">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled
+              style={{ opacity: 0.5, cursor: "not-allowed" }}
+            >
               Connect
             </button>
           </div>

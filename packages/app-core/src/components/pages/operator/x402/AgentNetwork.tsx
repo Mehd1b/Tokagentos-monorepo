@@ -54,9 +54,22 @@ export function AgentNetwork({
             per-request — and earns when they call yours.
           </div>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm">
-          + Register a service
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span
+            className="chip mute"
+            title="The agent-to-agent network backend is not live yet — sample topology shown."
+          >
+            ⟩ preview · backend coming
+          </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled
+            style={{ opacity: 0.5, cursor: "not-allowed" }}
+          >
+            + Register a service
+          </button>
+        </div>
       </div>
 
       <div className="a2a-grid">
@@ -72,7 +85,7 @@ export function AgentNetwork({
                 textTransform: "uppercase",
               }}
             >
-              live mesh · 6 peers
+              preview · sample topology
             </span>
             <div className="a2a-net-legend">
               <span className="a2a-leg">

@@ -59,22 +59,16 @@ export function SettlementFeed({
           className="mono"
           style={{
             fontSize: 10,
-            color: "var(--ok-bright)",
+            color: "var(--muted)",
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
             textTransform: "uppercase",
             letterSpacing: "0.06em",
           }}
+          title="Sample stream — the A2A settlement backend is not live yet."
         >
-          <span
-            className="dot-pulse"
-            style={{
-              background: "var(--ok-bright)",
-              boxShadow: "0 0 6px var(--ok-bright)",
-            }}
-          />{" "}
-          live
+          preview
         </span>
       </div>
       <div className="a2a-feed-body">

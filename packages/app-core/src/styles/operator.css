@@ -4,34 +4,41 @@
    prototype's generic class names (.card, .page, .btn, .chip, .sidebar, .win…)
    cannot collide with the rest of the app. Keyframes are op- prefixed.
 
-   Palette is aliased onto the codebase's existing brand tokens (brand-gold.css);
-   --text/--text-strong/--muted/--muted-strong/--rich-black/--charcoal/--steel/
-   --gold-glow already carry the correct dark values via data-theme="dark" and
-   are NOT redefined here. */
+   The palette is fully SELF-CONTAINED (literal spec values, scoped to .op-root)
+   so the operator renders its dark gold-on-jet look correctly regardless of the
+   host app's theme/tokens — it does NOT depend on brand-gold.css being present
+   (important for the scaffolded-app product, which doesn't ship brand-gold.css). */
 
-/* ── Palette alias block (bound to brand-gold.css tokens) ─────────────────── */
+/* ── Self-contained palette (literal spec values, scoped to .op-root) ──────── */
 .op-root {
   height: 100%;
-  color: var(--text);
 
-  --bg: var(--jet-black);                /* #050506 */
-  --border: var(--gunmetal);             /* #232329 */
-  --border-strong: var(--dark-silver);   /* #313136 */
-  --gold: var(--classic-gold);           /* #f0b90b */
-  --gold-hi: var(--highlight-gold);      /* #f3ba2f */
-  --gold-deep: var(--deep-gold);         /* #d8a000 */
-  --silver: var(--bright-silver);        /* #b9b9c2 */
+  --bg: #050506;
+  --rich-black: #0a0a0c;
+  --charcoal: #121214;
+  --border: #232329;
+  --border-strong: #313136;
+  --gold: #f0b90b;
+  --gold-hi: #f3ba2f;
+  --gold-deep: #d8a000;
+  --gold-glow: rgba(240, 185, 11, 0.16);
+  --silver: #b9b9c2;
+  --steel: #8a8a94;
+  --text: #d0d0d8;
+  --text-strong: #f0f0f4;
+  --muted: #7e7e8a;
+  --muted-strong: #a0a0ac;
   --ok: #03a66d;
-  --ok-bright: #4dd2a1;                  /* the one token not already in the codebase */
+  --ok-bright: #4dd2a1;
   --eth: #627eea; --base: #0052ff; --arb: #28a0f0; --op: #ff0420; --pol: #8247e5;
-
-  /* Prototype tokens genuinely absent from brand-gold.css :root — added here only */
   --bg-card: #0e0e11;
   --info: #60a5fa;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --sidebar-w: 248px;
+
+  color: var(--text);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

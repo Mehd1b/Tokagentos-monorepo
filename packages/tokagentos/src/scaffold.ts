@@ -270,7 +270,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "boot. Force-disable to silence the warning. Re-enable in upstream " +
       "deployments by removing this surgical-patch.",
     find:
-      "    // Default is \"local sidecar allowed\" — only disable if explicitly set to\n" +
+      '    // Default is "local sidecar allowed" — only disable if explicitly set to\n' +
       "    // false. Mobile forces this to false regardless of user setting.\n" +
       "    const localN8nEnabled =\n" +
       "      params.isNativePlatform === true\n" +
@@ -326,7 +326,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "      // If the action's name/description/parameters change in\n" +
       "      // plugins/plugin-tokagent-strategy/src/actions/register-existing-vault.ts,\n" +
       "      // update bullet 10 here to match.\n" +
-      "    ].join(\"\\n\"),\n" +
+      '    ].join("\\n"),\n' +
       "  ];\n",
   },
   {
@@ -341,22 +341,22 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "constant in-place; the doc keys/filenames stay the same so seed-by-key " +
       "deduplication continues to work across boots.",
     find:
-      'export const ELIZA_OVERVIEW_TEXT =\n' +
+      "export const ELIZA_OVERVIEW_TEXT =\n" +
       '  "Eliza is an autonomous agent powered by elizaOS, the agent framework. Users can ask Eliza to write code, add new skills, and trigger recurring workflows with heartbeats that run at regular intervals. Eliza Cloud is an open source cloud backend that simplifies deploying and delivering Eliza.";\n' +
-      '\n' +
-      'export const ELIZA_HISTORY_TEXT =\n' +
+      "\n" +
+      "export const ELIZA_HISTORY_TEXT =\n" +
       '  "ELIZA was created by Joseph Weizenbaum at MIT in the mid-1960s and is widely regarded as one of the earliest chatbots. Its best-known script, DOCTOR, used pattern matching to imitate a Rogerian psychotherapist and showed how simple language rules could feel surprisingly conversational. ELIZA helped define the history of chatbots and influenced later work on conversational agents.";\n' +
-      '\n' +
-      'export const ELIZA_CLOUD_BASICS_TEXT =\n' +
+      "\n" +
+      "export const ELIZA_CLOUD_BASICS_TEXT =\n" +
       '  "Eliza Cloud is the managed backend and app platform for Eliza when cloud mode is enabled. Builders can create an app, keep its appId, use Cloud login and redirect flows so app users can authenticate against Cloud, route chat and media APIs through Cloud, monetize app usage with inference markup and purchase-share settings, and deploy Docker containers when an app needs server-side execution.";\n',
     replaceWith:
-      'export const ELIZA_OVERVIEW_TEXT =\n' +
+      "export const ELIZA_OVERVIEW_TEXT =\n" +
       '  "Tokagent is a DeFi vault operator built on Tokamak. It runs automated strategies out of an on-chain vault that the operator controls, sizing positions against available collateral and routing every write through the vault\\u2019s allowlisted batch executor. Strategy kinds: yield-auto-compound = supply USDC to Aave v3 on Polygon and re-stake yield. polymarket-value-hunt = scan Polymarket binary markets for mispriced YES/NO outcomes and buy the cheap leg. perp-funding-arb = SINGLE-exchange (Hyperliquid only) cross-symbol funding-rate dispersion: long the symbol with the lowest hourly funding, short the symbol with the highest funding, both legs in the same Hyperliquid vault. It is NOT cross-exchange. Always call GET_TOKAGENT_STATUS at the start of a session, propose actions before executing, and never invent vault addresses, balances, or APRs.";\n' +
-      '\n' +
-      'export const ELIZA_HISTORY_TEXT =\n' +
+      "\n" +
+      "export const ELIZA_HISTORY_TEXT =\n" +
       '  "Tokagent is built on top of elizaOS, an open-source agent framework. The Tokagent product layer adds four plugins: tokagent-strategy (GET_TOKAGENT_STATUS, BUILD_STRATEGY, DEPLOY_TOKAGENT_VAULT, list/start/stop, backtest), tokagent-perps (Hyperliquid perpetual trading via vault allowlist), tokagent-polymarket (Polymarket buy/sell/redeem via vault allowlist), and tokagent-yield (Aave deposit/withdraw via vault allowlist). A vaultContext provider injects current vault and strategy state into every turn so the LLM never has to guess about deployed state. The agent uses these plugins to compose, deploy, and run strategies from chat — with a two-turn pattern: propose first, execute only after user confirmation.";\n' +
-      '\n' +
-      'export const ELIZA_CLOUD_BASICS_TEXT =\n' +
+      "\n" +
+      "export const ELIZA_CLOUD_BASICS_TEXT =\n" +
       '  "A Tokagent vault is an on-chain smart contract on Tokamak that holds operator capital and routes writes through an allowlisted batch executor. The agent never signs freelance transactions from the hot wallet by default; instead it submits batches to the vault, which validates them against the allowlist before execution. To deploy a new vault: call DEPLOY_TOKAGENT_VAULT with chain (defaults to hyperevm) and packs (defaults to the chain\\u2019s primary pack — hyperliquid-perps-hyperevm on hyperevm, aave-v3-polygon on polygon). The deploy waits for transaction receipt and persists the new vault address back to runtime settings, so the [vault-context] block on the next turn lists the deployed address. Subsequent BUILD_STRATEGY / OPEN_PERP_POSITION / DEPOSIT_TO_AAVE / etc. operate against that vault.";\n',
   },
   {
@@ -424,7 +424,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "      await new Promise<void>((resolve, reject) => {\n" +
       "        chatSendQueueRef.current.push({\n" +
       "          rawInput,\n" +
-      "          channelType: options?.channelType ?? \"DM\",\n" +
+      '          channelType: options?.channelType ?? "DM",\n' +
       "          conversationId: options?.conversationId,\n" +
       "          images: options?.images,\n" +
       "          metadata: buildChatViewMetadata(tab, options?.metadata),\n" +
@@ -470,7 +470,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "          ...prev,\n" +
       "          {\n" +
       "            id: optimisticUserMsgId as string,\n" +
-      "            role: \"user\",\n" +
+      '            role: "user",\n' +
       "            text: trimmedRawInput,\n" +
       "            timestamp: optimisticNow,\n" +
       "          },\n" +
@@ -480,7 +480,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "      await new Promise<void>((resolve, reject) => {\n" +
       "        chatSendQueueRef.current.push({\n" +
       "          rawInput,\n" +
-      "          channelType: options?.channelType ?? \"DM\",\n" +
+      '          channelType: options?.channelType ?? "DM",\n' +
       "          conversationId: options?.conversationId,\n" +
       "          images: options?.images,\n" +
       "          metadata: buildChatViewMetadata(tab, options?.metadata),\n" +
@@ -516,8 +516,8 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "      setCompanionMessageCutoffTs(now);\n" +
       "      setConversationMessages((prev: ConversationMessage[]) => [\n" +
       "        ...prev,\n" +
-      "        { id: userMsgId, role: \"user\", text, timestamp: now },\n" +
-      "        { id: assistantMsgId, role: \"assistant\", text: \"\", timestamp: now },\n" +
+      '        { id: userMsgId, role: "user", text, timestamp: now },\n' +
+      '        { id: assistantMsgId, role: "assistant", text: "", timestamp: now },\n' +
       "      ]);\n",
     replaceWith:
       "      const now = Date.now();\n" +
@@ -531,12 +531,12 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "        const userAlreadyPresent = prev.some((m) => m.id === userMsgId);\n" +
       "        const next: ConversationMessage[] = [...prev];\n" +
       "        if (!userAlreadyPresent) {\n" +
-      "          next.push({ id: userMsgId, role: \"user\", text, timestamp: now });\n" +
+      '          next.push({ id: userMsgId, role: "user", text, timestamp: now });\n' +
       "        }\n" +
       "        next.push({\n" +
       "          id: assistantMsgId,\n" +
-      "          role: \"assistant\",\n" +
-      "          text: \"\",\n" +
+      '          role: "assistant",\n' +
+      '          text: "",\n' +
       "          timestamp: now,\n" +
       "        });\n" +
       "        return next;\n" +
@@ -553,25 +553,25 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "plugin-served SPA at /v1/billing/dashboard.",
     find:
       "  {\n" +
-      "    label: \"Settings\",\n" +
-      "    tabs: [\"settings\"],\n" +
+      '    label: "Settings",\n' +
+      '    tabs: ["settings"],\n' +
       "    icon: Settings,\n" +
-      "    description: \"Configuration and preferences\",\n" +
+      '    description: "Configuration and preferences",\n' +
       "  },\n" +
       "];\n",
     replaceWith:
       "  {\n" +
-      "    label: \"Settings\",\n" +
-      "    tabs: [\"settings\"],\n" +
+      '    label: "Settings",\n' +
+      '    tabs: ["settings"],\n' +
       "    icon: Settings,\n" +
-      "    description: \"Configuration and preferences\",\n" +
+      '    description: "Configuration and preferences",\n' +
       "  },\n" +
       "  // [tokagent surgical-patch] x402 tab — see scaffold.ts UPSTREAM_SURGICAL_PATCHES.\n" +
       "  {\n" +
-      "    label: \"x402\",\n" +
-      "    tabs: [\"billing\"],\n" +
+      '    label: "x402",\n' +
+      '    tabs: ["billing"],\n' +
       "    icon: Wallet,\n" +
-      "    description: \"x402 payment rail: PTON credits, API keys, top-up, usage\",\n" +
+      '    description: "x402 payment rail: PTON credits, API keys, top-up, usage",\n' +
       "  },\n" +
       "];\n",
   },
@@ -583,18 +583,18 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "at packages/app-core/src/components/pages/BillingPageView.tsx.",
     find:
       "const SettingsView = lazyNamedView(\n" +
-      "  () => import(\"./components/pages/SettingsView\"),\n" +
-      "  \"SettingsView\",\n" +
+      '  () => import("./components/pages/SettingsView"),\n' +
+      '  "SettingsView",\n' +
       ");\n",
     replaceWith:
       "const SettingsView = lazyNamedView(\n" +
-      "  () => import(\"./components/pages/SettingsView\"),\n" +
-      "  \"SettingsView\",\n" +
+      '  () => import("./components/pages/SettingsView"),\n' +
+      '  "SettingsView",\n' +
       ");\n" +
       "// [tokagent surgical-patch] BillingPageView — overlaid via scaffold-patches.\n" +
       "const BillingPageView = lazyNamedView(\n" +
-      "  () => import(\"./components/pages/BillingPageView\"),\n" +
-      "  \"BillingPageView\",\n" +
+      '  () => import("./components/pages/BillingPageView"),\n' +
+      '  "BillingPageView",\n' +
       ");\n",
   },
   {
@@ -604,24 +604,112 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "settings case so the case-statement ordering stays stable across " +
       "upstream changes.",
     find:
-      "      case \"settings\":\n" +
+      '      case "settings":\n' +
       "        return (\n" +
       "          <TabContentView chatDisabled>\n" +
-      "            <SettingsView key=\"settings-root\" />\n" +
+      '            <SettingsView key="settings-root" />\n' +
       "          </TabContentView>\n" +
       "        );\n",
     replaceWith:
       "      // [tokagent surgical-patch] x402 tab — fixed entry, no enabled gate.\n" +
-      "      case \"billing\":\n" +
+      '      case "billing":\n' +
       "        return (\n" +
       "          <TabContentView chatDisabled>\n" +
       "            <BillingPageView />\n" +
       "          </TabContentView>\n" +
       "        );\n" +
-      "      case \"settings\":\n" +
+      '      case "settings":\n' +
       "        return (\n" +
       "          <TabContentView chatDisabled>\n" +
-      "            <SettingsView key=\"settings-root\" />\n" +
+      '            <SettingsView key="settings-root" />\n' +
+      "          </TabContentView>\n" +
+      "        );\n",
+  },
+  // ── Operator console (x402 redesign): sidebar tab + App.tsx import/case ─────
+  // These anchor on the billing-patch output above, so they MUST stay ordered
+  // after the billing patches. The OperatorShell + operator.css are overlaid via
+  // scaffold-patches at packages/app-core/src/components/pages/operator/.
+  {
+    path: "packages/app-core/src/navigation/index.ts",
+    description:
+      "Add an Operator tab (the x402 operator console: credits/top-up, " +
+      "agent-to-agent network, settlement feed, service directory, usage, " +
+      "API keys) to the sidebar, alongside the x402 billing tab.",
+    find:
+      "  // [tokagent surgical-patch] x402 tab — see scaffold.ts UPSTREAM_SURGICAL_PATCHES.\n" +
+      "  {\n" +
+      '    label: "x402",\n' +
+      '    tabs: ["billing"],\n' +
+      "    icon: Wallet,\n" +
+      '    description: "x402 payment rail: PTON credits, API keys, top-up, usage",\n' +
+      "  },\n" +
+      "];\n",
+    replaceWith:
+      "  // [tokagent surgical-patch] x402 tab — see scaffold.ts UPSTREAM_SURGICAL_PATCHES.\n" +
+      "  {\n" +
+      '    label: "x402",\n' +
+      '    tabs: ["billing"],\n' +
+      "    icon: Wallet,\n" +
+      '    description: "x402 payment rail: PTON credits, API keys, top-up, usage",\n' +
+      "  },\n" +
+      "  // [tokagent surgical-patch] Operator console — see scaffold.ts UPSTREAM_SURGICAL_PATCHES.\n" +
+      "  {\n" +
+      '    label: "Operator",\n' +
+      '    tabs: ["operator"],\n' +
+      "    icon: Wallet,\n" +
+      '    description: "Local operator console — x402 credits & agent-to-agent network",\n' +
+      "  },\n" +
+      "];\n",
+  },
+  {
+    path: "packages/app-core/src/App.tsx",
+    description:
+      "Lazy-import OperatorShell so the Operator tab has a renderer. " +
+      "OperatorShell + the operator/ tree are overlaid via scaffold-patches.",
+    find:
+      "// [tokagent surgical-patch] BillingPageView — overlaid via scaffold-patches.\n" +
+      "const BillingPageView = lazyNamedView(\n" +
+      '  () => import("./components/pages/BillingPageView"),\n' +
+      '  "BillingPageView",\n' +
+      ");\n",
+    replaceWith:
+      "// [tokagent surgical-patch] BillingPageView — overlaid via scaffold-patches.\n" +
+      "const BillingPageView = lazyNamedView(\n" +
+      '  () => import("./components/pages/BillingPageView"),\n' +
+      '  "BillingPageView",\n' +
+      ");\n" +
+      "// [tokagent surgical-patch] OperatorShell (x402 console) — overlaid via scaffold-patches.\n" +
+      "const OperatorShell = lazyNamedView(\n" +
+      '  () => import("./components/pages/operator/OperatorShell"),\n' +
+      '  "OperatorShell",\n' +
+      ");\n",
+  },
+  {
+    path: "packages/app-core/src/App.tsx",
+    description:
+      "Route the 'operator' tab to OperatorShell. Inserted after the billing " +
+      "case so case-statement ordering stays stable across upstream changes.",
+    find:
+      "      // [tokagent surgical-patch] x402 tab — fixed entry, no enabled gate.\n" +
+      '      case "billing":\n' +
+      "        return (\n" +
+      "          <TabContentView chatDisabled>\n" +
+      "            <BillingPageView />\n" +
+      "          </TabContentView>\n" +
+      "        );\n",
+    replaceWith:
+      "      // [tokagent surgical-patch] x402 tab — fixed entry, no enabled gate.\n" +
+      '      case "billing":\n' +
+      "        return (\n" +
+      "          <TabContentView chatDisabled>\n" +
+      "            <BillingPageView />\n" +
+      "          </TabContentView>\n" +
+      "        );\n" +
+      "      // [tokagent surgical-patch] Operator console — overlaid via scaffold-patches.\n" +
+      '      case "operator":\n' +
+      "        return (\n" +
+      "          <TabContentView chatDisabled>\n" +
+      "            <OperatorShell />\n" +
       "          </TabContentView>\n" +
       "        );\n",
   },
@@ -635,29 +723,29 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "rail configured from the x402 sidebar tab.",
     find:
       "  {\n" +
-      "    id: \"zai\",\n" +
-      "    name: \"z.ai\",\n" +
-      "    envKey: \"ZAI_API_KEY\",\n" +
-      "    pluginName: \"@homunculuslabs/plugin-zai\",\n" +
+      '    id: "zai",\n' +
+      '    name: "z.ai",\n' +
+      '    envKey: "ZAI_API_KEY",\n' +
+      '    pluginName: "@homunculuslabs/plugin-zai",\n' +
       "    keyPrefix: null,\n" +
-      "    description: \"GLM models via z.ai Coding Plan.\",\n" +
-      "    family: \"zai\",\n" +
-      "    authMode: \"api-key\",\n" +
-      "    group: \"local\",\n" +
+      '    description: "GLM models via z.ai Coding Plan.",\n' +
+      '    family: "zai",\n' +
+      '    authMode: "api-key",\n' +
+      '    group: "local",\n' +
       "    order: 150,\n" +
       "  },\n" +
       "] as const satisfies ReadonlyArray<ProviderOption>;\n",
     replaceWith:
       "  {\n" +
-      "    id: \"zai\",\n" +
-      "    name: \"z.ai\",\n" +
-      "    envKey: \"ZAI_API_KEY\",\n" +
-      "    pluginName: \"@homunculuslabs/plugin-zai\",\n" +
+      '    id: "zai",\n' +
+      '    name: "z.ai",\n' +
+      '    envKey: "ZAI_API_KEY",\n' +
+      '    pluginName: "@homunculuslabs/plugin-zai",\n' +
       "    keyPrefix: null,\n" +
-      "    description: \"GLM models via z.ai Coding Plan.\",\n" +
-      "    family: \"zai\",\n" +
-      "    authMode: \"api-key\",\n" +
-      "    group: \"local\",\n" +
+      '    description: "GLM models via z.ai Coding Plan.",\n' +
+      '    family: "zai",\n' +
+      '    authMode: "api-key",\n' +
+      '    group: "local",\n' +
       "    order: 150,\n" +
       "  },\n" +
       "  // [tokagent surgical-patch] x402 provider — dispatches LLM calls\n" +
@@ -665,15 +753,15 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "  // billing via the x402 rail. Configure top-up, keys, and usage\n" +
       "  // from the x402 sidebar tab.\n" +
       "  {\n" +
-      "    id: \"x402\",\n" +
-      "    name: \"x402 only (can be configured from the gateway)\",\n" +
-      "    envKey: \"OPENROUTER_API_KEY\",\n" +
-      "    pluginName: \"@elizaos/plugin-openrouter\",\n" +
-      "    keyPrefix: \"sk-or-\",\n" +
-      "    description: \"Pay-per-request via the x402 payment rail. Configure top-up, keys, and usage from the x402 sidebar tab.\",\n" +
-      "    family: \"openrouter\",\n" +
-      "    authMode: \"api-key\",\n" +
-      "    group: \"local\",\n" +
+      '    id: "x402",\n' +
+      '    name: "x402 only (can be configured from the gateway)",\n' +
+      '    envKey: "OPENROUTER_API_KEY",\n' +
+      '    pluginName: "@elizaos/plugin-openrouter",\n' +
+      '    keyPrefix: "sk-or-",\n' +
+      '    description: "Pay-per-request via the x402 payment rail. Configure top-up, keys, and usage from the x402 sidebar tab.",\n' +
+      '    family: "openrouter",\n' +
+      '    authMode: "api-key",\n' +
+      '    group: "local",\n' +
       "    order: 5,\n" +
       "  },\n" +
       "] as const satisfies ReadonlyArray<ProviderOption>;\n",
@@ -1251,11 +1339,10 @@ export function removeSubmodulesFromGitmodules(
   // its URL.
   for (const submodulePath of paths) {
     try {
-      execFileSync(
-        "git",
-        ["rm", "--cached", "-rf", "--quiet", submodulePath],
-        { cwd: submoduleRoot, stdio: "ignore" },
-      );
+      execFileSync("git", ["rm", "--cached", "-rf", "--quiet", submodulePath], {
+        cwd: submoduleRoot,
+        stdio: "ignore",
+      });
     } catch {
       // Path not in index (e.g., already removed) — fine.
     }
@@ -1277,7 +1364,11 @@ export function removeSubmodulesFromGitmodules(
   const lines = fs.readFileSync(gitmodulesPath, "utf8").split("\n");
   const removalSet = new Set(paths);
 
-  type Block = { headerLine: string | null; bodyLines: string[]; path: string | null };
+  type Block = {
+    headerLine: string | null;
+    bodyLines: string[];
+    path: string | null;
+  };
   const blocks: Block[] = [];
   let current: Block = { headerLine: null, bodyLines: [], path: null };
 
@@ -1575,11 +1666,10 @@ export function hydrateGitSubmoduleWorkspace(options: {
   // a transient submodule fetch error shouldn't block scaffold creation.
   // The required-submodule loop below re-attempts each explicitly.
   try {
-    execFileSync(
-      "git",
-      ["submodule", "update", "--init", "--recursive"],
-      { cwd: submoduleRoot, stdio: "inherit" },
-    );
+    execFileSync("git", ["submodule", "update", "--init", "--recursive"], {
+      cwd: submoduleRoot,
+      stdio: "inherit",
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(
@@ -1800,16 +1890,14 @@ export function initializeGitSubmodule(options: {
   // branch tip — older pinned commits aren't in the local objects.
   const commit = options.commit?.trim();
   if (commit) {
-    execFileSync(
-      "git",
-      ["fetch", "--depth", "1", "origin", commit],
-      { cwd: submoduleRoot, stdio: "inherit" },
-    );
-    execFileSync(
-      "git",
-      ["checkout", "--detach", commit],
-      { cwd: submoduleRoot, stdio: "inherit" },
-    );
+    execFileSync("git", ["fetch", "--depth", "1", "origin", commit], {
+      cwd: submoduleRoot,
+      stdio: "inherit",
+    });
+    execFileSync("git", ["checkout", "--detach", commit], {
+      cwd: submoduleRoot,
+      stdio: "inherit",
+    });
   }
 }
 
@@ -1844,16 +1932,14 @@ export function updateGitSubmodule(options: {
     // Pinned mode: ignore --remote (which follows branch HEAD) and
     // force-checkout the pinned SHA so existing scaffolds stay locked
     // to the same upstream state as fresh ones.
-    execFileSync(
-      "git",
-      ["fetch", "--depth", "1", "origin", commit],
-      { cwd: submoduleRoot, stdio: "inherit" },
-    );
-    execFileSync(
-      "git",
-      ["checkout", "--detach", commit],
-      { cwd: submoduleRoot, stdio: "inherit" },
-    );
+    execFileSync("git", ["fetch", "--depth", "1", "origin", commit], {
+      cwd: submoduleRoot,
+      stdio: "inherit",
+    });
+    execFileSync("git", ["checkout", "--detach", commit], {
+      cwd: submoduleRoot,
+      stdio: "inherit",
+    });
     return;
   }
 

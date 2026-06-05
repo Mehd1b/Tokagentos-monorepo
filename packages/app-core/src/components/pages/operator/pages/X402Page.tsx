@@ -101,8 +101,8 @@ export function X402Page() {
                 position: "relative",
                 width: "min(1080px, 96vw)",
                 height: "min(760px, 92vh)",
-                background: "var(--background, #0b0b0e)",
-                color: "var(--foreground, #e6e6ea)",
+                background: "var(--bg, #0b0b0e)",
+                color: "var(--text, #e6e6ea)",
                 borderRadius: 14,
                 overflow: "hidden",
                 boxShadow: "0 24px 80px rgba(0, 0, 0, 0.6)",
@@ -132,7 +132,19 @@ export function X402Page() {
               >
                 ✕
               </button>
-              <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+              {/* Flex column so a `flex:1` child (the scaffold's iframe
+                  BillingPageView) gets a definite height instead of collapsing
+                  to the ~150px iframe default; also gives the monorepo React
+                  BillingPageView a real height so its internal scroll works. */}
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
                 <Suspense
                   fallback={
                     <div

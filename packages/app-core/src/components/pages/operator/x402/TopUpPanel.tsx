@@ -6,8 +6,9 @@
  * Token list, presets, PTON rate, vault address, and balance values come from
  * "../mock" so real balances/quotes can be wired in later.
  */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { KeyMark } from "../brand/KeyMark";
+import { fetchCredits, formatAttoPtonString, useLive } from "../client-billing";
 import {
   PTON_PER_USD,
   TOPUP_PRESETS,
@@ -41,6 +42,14 @@ export function TopUpPanel({
   // PTON ≈ USD / TON price; TON ~$0.50 → mock 1 USD = ~2 PTON minus margin
   const ptonOut = usd * ptonPerUsd;
 
+  // Live ClaudeVault balance (GET /v1/credits/me); falls back to mock when the
+  // gateway is unavailable / unauthenticated.
+  const creditsFetcher = useCallback(() => fetchCredits(), []);
+  const credits = useLive(creditsFetcher);
+  const liveAmount = credits.data
+    ? formatAttoPtonString(credits.data.balance)
+    : null;
+
   return (
     <div className="x402-grid">
       {/* Balance */}
@@ -49,21 +58,27 @@ export function TopUpPanel({
           <div className="card-label">
             <KeyMark size={14} /> ClaudeVault balance
           </div>
-          <span className="chip ok">
-            <span
-              className="dot-pulse"
-              style={{
-                background: "var(--ok-bright)",
-                boxShadow: "0 0 6px var(--ok-bright)",
-              }}
-            />{" "}
-            live · mainnet
-          </span>
+          {credits.live ? (
+            <span className="chip ok">
+              <span
+                className="dot-pulse"
+                style={{
+                  background: "var(--ok-bright)",
+                  boxShadow: "0 0 6px var(--ok-bright)",
+                }}
+              />{" "}
+              live · mainnet
+            </span>
+          ) : (
+            <span className="chip mute">⟩ example values</span>
+          )}
         </div>
         <div className="bal-amount">
-          {balance.amount} <em>PTON</em>
+          {liveAmount ?? balance.amount} <em>PTON</em>
         </div>
-        <div className="bal-usd">{balance.usd}</div>
+        <div className="bal-usd">
+          {credits.live ? "funds LLM + agent-to-agent calls" : balance.usd}
+        </div>
 
         <div className="bal-bar">
           <div style={{ width: `${balance.spentPct}%` }} />

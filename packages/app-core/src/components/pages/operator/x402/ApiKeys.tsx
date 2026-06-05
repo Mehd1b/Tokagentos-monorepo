@@ -1,10 +1,51 @@
 /**
  * x402 · API keys — HMAC key list for headless agents.
  * Ported from handoff_app/prototype/components/X402Lower.jsx (ApiKeys).
+ *
+ * Live: lists / mints / revokes real keys via /v1/keys; falls back to mock data
+ * when the gateway is unavailable or the caller is unauthenticated. The list
+ * endpoint never returns the secret (shown once on mint), so the displayed
+ * value is a stable masked label derived from the key id.
  */
+import { useCallback } from "react";
+import {
+  apiKeyRowToEntry,
+  fetchApiKeys,
+  mintApiKey,
+  revokeApiKey,
+  useLive,
+} from "../client-billing";
 import { API_KEYS, type ApiKeyEntry } from "../mock";
 
+type KeyRow = ApiKeyEntry & { id?: string };
+
 export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
+  const keysFetcher = useCallback(() => fetchApiKeys(), []);
+  const { data, live: isLive, reload } = useLive(keysFetcher);
+  const shownKeys: KeyRow[] = data ? data.map(apiKeyRowToEntry) : keys;
+
+  const onMint = useCallback(async () => {
+    try {
+      await mintApiKey("operator console");
+      reload();
+    } catch {
+      /* unauthenticated / gateway unavailable — keep the mock view */
+    }
+  }, [reload]);
+
+  const onRevoke = useCallback(
+    async (id?: string) => {
+      if (!id) return;
+      try {
+        await revokeApiKey(id);
+        reload();
+      } catch {
+        /* ignore — keep current view */
+      }
+    },
+    [reload],
+  );
+
   return (
     <>
       <div className="sec-head">
@@ -17,14 +58,25 @@ export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
             Stateless — ideal for daemons.
           </div>
         </div>
-        <button type="button" className="btn btn-gold btn-sm">
-          + Mint key
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {isLive ? (
+            <span className="chip ok">live</span>
+          ) : (
+            <span className="chip mute">⟩ example values</span>
+          )}
+          <button
+            type="button"
+            className="btn btn-gold btn-sm"
+            onClick={onMint}
+          >
+            + Mint key
+          </button>
+        </div>
       </div>
 
       <div className="card keys-card">
-        {keys.map((k) => (
-          <div key={k.val} className="key-row">
+        {shownKeys.map((k) => (
+          <div key={k.id ?? k.val} className="key-row">
             <div className="key-icon">
               <svg
                 width="16"
@@ -50,7 +102,11 @@ export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
               <div className="key-val">{k.val}</div>
             </div>
             <div className="key-meta">{k.meta}</div>
-            <button type="button" className="btn btn-ghost btn-sm">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => onRevoke(k.id)}
+            >
               Revoke
             </button>
           </div>

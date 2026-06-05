@@ -3,7 +3,12 @@
  * breakdown. Ported from handoff_app/prototype/components/X402Lower.jsx
  * (UsageAnalytics).
  */
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import {
+  fetchUsageSummary,
+  formatAttoPtonString,
+  useLive,
+} from "../client-billing";
 import {
   makeUsageSeries,
   SPEND_MODELS,
@@ -12,6 +17,14 @@ import {
   type UsageTotals,
 } from "../mock";
 
+/** Bar-fill gradients applied to live spend-by-model rows, by position. */
+const MODEL_COLORS = [
+  "linear-gradient(90deg, #f0b90b, #f3ba2f)",
+  "linear-gradient(90deg, #d8a000, #f0b90b)",
+  "linear-gradient(90deg, #4dd2a1, #03a66d)",
+  "linear-gradient(90deg, #60a5fa, #3b82f6)",
+];
+
 export function UsageChart({
   totals = USAGE_TOTALS,
   models = SPEND_MODELS,
@@ -19,12 +32,46 @@ export function UsageChart({
   totals?: UsageTotals;
   models?: SpendModel[];
 } = {}) {
-  // 30-day spend bars (deterministic — see makeUsageSeries in mock).
-  // Each bar carries a stable id so the chart key isn't the raw array index.
-  const bars = useMemo(
+  // 30-day spend bars (deterministic mock — stable bar ids so the chart key
+  // isn't the raw array index).
+  const mockBars = useMemo(
     () => makeUsageSeries(30).map((value, i) => ({ value, id: `bar-${i}` })),
     [],
   );
+
+  // Live usage & spend (GET /v1/usage/summary); falls back to mock when the
+  // gateway is unavailable / unauthenticated. byModel / byDay are used only
+  // when the gateway returns them.
+  const usageFetcher = useCallback(() => fetchUsageSummary(), []);
+  const usage = useLive(usageFetcher);
+  const u = usage.data;
+
+  const shownTotals: UsageTotals = u
+    ? {
+        total: formatAttoPtonString(u.totalCostPton),
+        usd: `≈ $${Number(u.totalCostUsd).toFixed(2)}`,
+        avg: `${
+          u.callCount > 0
+            ? (Number(u.totalCostPton) / 1e18 / u.callCount).toFixed(3)
+            : "0.000"
+        } / call avg`,
+      }
+    : totals;
+
+  const totalPton = u ? Number(u.totalCostPton) || 1 : 1;
+  const shownModels: SpendModel[] =
+    u?.byModel && u.byModel.length > 0
+      ? u.byModel.map((m, i) => ({
+          name: m.model,
+          pct: Math.round((Number(m.costPton) / totalPton) * 100),
+          color: MODEL_COLORS[i % MODEL_COLORS.length],
+        }))
+      : models;
+
+  const bars =
+    u?.byDay && u.byDay.length > 0
+      ? u.byDay.map((d, i) => ({ value: Math.max(2, d.calls), id: `bar-${i}` }))
+      : mockBars;
   const max = Math.max(...bars.map((b) => b.value));
 
   return (
@@ -39,7 +86,12 @@ export function UsageChart({
             days.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {usage.live ? (
+            <span className="chip ok">live</span>
+          ) : (
+            <span className="chip mute">⟩ example values</span>
+          )}
           <span className="chip mute">30d</span>
           <span className="chip mute">90d</span>
         </div>
@@ -74,7 +126,7 @@ export function UsageChart({
                   marginTop: 4,
                 }}
               >
-                {totals.total}{" "}
+                {shownTotals.total}{" "}
                 <span style={{ fontSize: 14, color: "var(--gold-hi)" }}>
                   PTON
                 </span>
@@ -85,7 +137,7 @@ export function UsageChart({
                 className="mono"
                 style={{ fontSize: 11, color: "var(--muted)" }}
               >
-                {totals.usd}
+                {shownTotals.usd}
               </div>
               <div
                 className="mono"
@@ -95,7 +147,7 @@ export function UsageChart({
                   marginTop: 4,
                 }}
               >
-                {totals.avg}
+                {shownTotals.avg}
               </div>
             </div>
           </div>
@@ -148,7 +200,7 @@ export function UsageChart({
         <div className="card">
           <div className="card-label">Spend by model</div>
           <div className="usage-models">
-            {models.map((m) => (
+            {shownModels.map((m) => (
               <div key={m.name} className="model-row">
                 <div className="model-row-top">
                   <span className="model-name">{m.name}</span>

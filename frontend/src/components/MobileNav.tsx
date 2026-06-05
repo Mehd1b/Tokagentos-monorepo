@@ -15,6 +15,7 @@ const SECTIONS = [
 const EXTERNAL = [
   ["tokagent", "https://tokagent.network"],
   ["x402", "https://x402.org/"],
+  ["telegram", "https://t.me/+mlGZM1ZDu685YzE0"],
 ] as const;
 
 export function MobileNav() {

@@ -4,6 +4,7 @@ import { Logo } from "./Logo";
 const LINKS = [
   { href: "https://tokagent.network", label: "tokagent", external: true },
   { href: "https://x402.org/", label: "x402", external: true },
+  { href: "https://t.me/+mlGZM1ZDu685YzE0", label: "telegram", external: true },
 ];
 
 export function Nav() {

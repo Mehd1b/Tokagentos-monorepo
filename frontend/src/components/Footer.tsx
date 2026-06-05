@@ -20,6 +20,11 @@ const COLUMNS = [
       },
       { href: "https://x.com/tokagent", label: "twitter", external: true },
       {
+        href: "https://t.me/+mlGZM1ZDu685YzE0",
+        label: "telegram",
+        external: true,
+      },
+      {
         href: "https://medium.com/@mehd1b",
         label: "blog",
         external: true,

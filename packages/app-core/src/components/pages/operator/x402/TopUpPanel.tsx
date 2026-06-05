@@ -27,6 +27,7 @@ export function TopUpPanel({
   balance = VAULT_BALANCE,
   vaultAddress = VAULT_ADDRESS,
   vaultAddressShort = VAULT_ADDRESS_SHORT,
+  onTopUp,
 }: {
   tokens?: TopUpToken[];
   presets?: readonly string[];
@@ -34,6 +35,12 @@ export function TopUpPanel({
   balance?: VaultBalance;
   vaultAddress?: string;
   vaultAddressShort?: string;
+  /**
+   * Opens the real top-up flow. Wired by X402Page to the working billing page
+   * (EIP-3009 deposit), so the button performs a real deposit rather than the
+   * swap form here, which is an illustrative preview of the route.
+   */
+  onTopUp?: () => void;
 } = {}) {
   const [tok, setTok] = useState(tokens[0].sym);
   const [amount, setAmount] = useState("250");
@@ -201,6 +208,7 @@ export function TopUpPanel({
           type="button"
           className="btn btn-gold btn-lg"
           style={{ marginTop: 14, width: "100%" }}
+          onClick={onTopUp}
         >
           Deposit {amount || "0"} {tok} → PTON
         </button>

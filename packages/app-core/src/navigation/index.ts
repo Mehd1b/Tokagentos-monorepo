@@ -7,6 +7,7 @@ import {
   Clock3,
   Coins,
   Gamepad2,
+  KeyRound,
   MessageSquare,
   Monitor,
   PencilLine,
@@ -56,7 +57,8 @@ export type BuiltinTab =
   | "desktop"
   | "settings"
   | "logs"
-  | "billing";
+  | "billing"
+  | "operator";
 
 /**
  * Tab identifier — includes all built-in tabs plus arbitrary strings
@@ -148,6 +150,13 @@ export const ALL_TAB_GROUPS: TabGroup[] = [
     icon: Coins,
     description: "Credits, top-up, API keys, and usage",
   },
+  {
+    label: "Operator",
+    tabs: ["operator"],
+    icon: KeyRound,
+    description:
+      "Local operator console — x402 credits & agent-to-agent network",
+  },
 ];
 
 /** A plugin-provided nav-page widget that should appear in the navigation. */
@@ -236,6 +245,7 @@ const TAB_PATHS: Record<BuiltinTab, string> = {
   settings: "/settings",
   logs: "/apps/logs",
   billing: "/billing",
+  operator: "/operator",
 };
 
 /** Legacy path redirects — old paths that now map to new tabs. */
@@ -472,6 +482,8 @@ export function titleForTab(tab: Tab): string {
       return "Stream";
     case "billing":
       return "Billing";
+    case "operator":
+      return "Operator";
     default:
       // Dynamic plugin tabs — capitalize the tab ID as a fallback title.
       return tab.charAt(0).toUpperCase() + tab.slice(1).replace(/-/g, " ");

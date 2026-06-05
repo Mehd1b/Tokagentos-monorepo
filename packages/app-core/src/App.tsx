@@ -13,9 +13,9 @@ import {
   ErrorBoundary,
 } from "@tokagentos/ui";
 import {
+  lazy,
   type ReactNode,
   Suspense,
-  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -27,6 +27,12 @@ const BillingPageView = lazy(() =>
     default: m.BillingPageView,
   })),
 );
+const OperatorShell = lazy(() =>
+  import("./components/pages/operator/OperatorShell.js").then((m) => ({
+    default: m.OperatorShell,
+  })),
+);
+
 import { subscribeDesktopBridgeEvent } from "./bridge/electrobun-rpc";
 import { GameViewOverlay } from "./components/apps/GameViewOverlay";
 import { getOverlayApp } from "./components/apps/overlay-app-registry";
@@ -264,6 +270,14 @@ function ViewRouter({
           <TabContentView>
             <Suspense fallback={null}>
               <BillingPageView />
+            </Suspense>
+          </TabContentView>
+        );
+      case "operator":
+        return (
+          <TabContentView>
+            <Suspense fallback={null}>
+              <OperatorShell />
             </Suspense>
           </TabContentView>
         );
@@ -570,11 +584,7 @@ export function App() {
             {isChatMobileLayout ? (
               <>
                 <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden pt-2 px-2">
-                  {isChat ? (
-                    <ChatView />
-                  ) : (
-                    <ConnectorsPageView />
-                  )}
+                  {isChat ? <ChatView /> : <ConnectorsPageView />}
                 </div>
 
                 {mobileConversationsOpen && (

@@ -8,11 +8,19 @@
  * model picker, usage analytics and API keys — each a self-contained sibling
  * under ../x402, driven only by live /v1/* data.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  type ChainMeta,
+  chainMeta,
+  loadDashboardConfig,
+} from "../chain-config";
 import { ApiKeys } from "../x402/ApiKeys";
 import { BalanceCard } from "../x402/BalanceCard";
+import { BridgeCard } from "../x402/BridgeCard";
+import { GetPtonRow } from "../x402/GetPtonRow";
 import { ModelPicker } from "../x402/ModelPicker";
 import { NetworkSwitcher } from "../x402/NetworkSwitcher";
+import { SwapCard } from "../x402/SwapCard";
 import { TopUpCard } from "../x402/TopUpCard";
 import { UsageChart } from "../x402/UsageChart";
 import { WalletConnectBar } from "../x402/WalletConnectBar";
@@ -30,6 +38,32 @@ export function X402Page() {
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number>(initialChainId);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The selected chain's capability flags (ton = wrappable, bridge = receives
+  // bridged TON), resolved from the dashboard config on mount. Drives which
+  // funding helpers render under the top-up card.
+  const [meta, setMeta] = useState<ChainMeta | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDashboardConfig().then((cfg) => {
+      if (!cancelled) setMeta(chainMeta(cfg, chainId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chainId]);
+
+  const bump = () => setRefreshKey((k) => k + 1);
+  // Conditional-display logic mirrors app.js:
+  //   • GetPtonRow  — when the chain exposes a wrappable underlying TON (Ethereum
+  //                   L1 TON, or Base bridged L2 TON). app.js updateGetPton L2396.
+  //   • BridgeCard  — when the chain carries a `bridge` descriptor (Base). app.js
+  //                   wireBridge L2014-2018.
+  //   • SwapCard    — Ethereum mainnet only (chainId === 1; the DEX route + WTON
+  //                   wrap live there). app.js swapToPton L1060-1064.
+  const showGetPton = !!meta?.ton;
+  const showBridge = !!meta?.bridge;
+  const showSwap = chainId === 1;
 
   return (
     <div className="page">
@@ -79,12 +113,32 @@ export function X402Page() {
         {/* Balance + top-up */}
         <div className="x402-grid">
           <BalanceCard chainId={chainId} refreshKey={refreshKey} />
-          <TopUpCard
-            address={address}
-            chainId={chainId}
-            onDeposited={() => setRefreshKey((k) => k + 1)}
-          />
+          <TopUpCard address={address} chainId={chainId} onDeposited={bump} />
         </div>
+
+        {/* On-chain funding helpers — only the ones the selected chain supports.
+            Bridge → Get PTON is the Base path; Swap is the Ethereum path. */}
+        {(showBridge || showGetPton || showSwap) && (
+          <div className="x402-grid" style={{ marginTop: 14 }}>
+            {showBridge && (
+              <BridgeCard
+                address={address}
+                chainId={chainId}
+                onBridged={bump}
+              />
+            )}
+            {showGetPton && (
+              <GetPtonRow
+                address={address}
+                chainId={chainId}
+                onWrapped={bump}
+              />
+            )}
+            {showSwap && (
+              <SwapCard address={address} chainId={chainId} onCredited={bump} />
+            )}
+          </div>
+        )}
 
         <ModelPicker />
 

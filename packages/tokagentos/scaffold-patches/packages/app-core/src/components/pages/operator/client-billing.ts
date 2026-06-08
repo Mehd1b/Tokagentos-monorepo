@@ -15,6 +15,7 @@
  * The A2A network graph + service directory have no backend yet and stay mock.
  */
 import { useCallback, useEffect, useState } from "react";
+import type { Eip3009Authorization } from "./eip712";
 
 // ── low-level fetch ─────────────────────────────────────────────────────────
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -54,6 +55,85 @@ export interface CreditsResponse {
 export function fetchCredits(chainId?: number): Promise<CreditsResponse> {
   const q = chainId ? `?chainId=${chainId}` : "";
   return getJson<CreditsResponse>(`/v1/credits/me${q}`);
+}
+
+// ── top-up (EIP-3009) ─────────────────────────────────────────────────────────
+export interface TopupQuote {
+  topupId: string;
+  chainId: number;
+  amountPton: string;
+  amountUsd: number;
+  tonUsd: number;
+  expiresAt: string;
+  vaultAddress: `0x${string}`;
+  ptonAddress: `0x${string}`;
+  domain: {
+    name: string;
+    version: string;
+    chainId: number;
+    verifyingContract: `0x${string}`;
+  };
+}
+
+/** POST /v1/topup/quote — returns amounts + the EIP-712 domain inline. */
+export function fetchTopupQuote(
+  amountUsd: number,
+  chainId: number,
+): Promise<TopupQuote> {
+  return getJson<TopupQuote>("/v1/topup/quote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amountUsd, chainId }),
+  });
+}
+
+export interface SettleOutcome {
+  ok: boolean;
+  status: number;
+  txHash?: string;
+  /** Human-readable error for the UI when ok === false. */
+  error?: string;
+}
+
+/**
+ * POST /v1/topup/settle. Returns a status-aware outcome (does NOT throw on
+ * 402/409/429/503) so the UI can map the documented failure codes.
+ */
+export async function settleTopup(
+  topupId: string,
+  chainId: number,
+  authorization: Eip3009Authorization,
+  signature: { v: number; r: string; s: string },
+): Promise<SettleOutcome> {
+  // Settle via the x402 X-PAYMENT path so the backend verifies against the EXACT
+  // bytes the client signed (incl. validBefore). The native plain-body path
+  // reconstructs validBefore from Date.now() at settle time → EIP-712 hash
+  // mismatch → signature recovery returns the wrong address → HTTP 402.
+  const xPayment = btoa(
+    JSON.stringify({ payload: { signature, authorization, quoteId: topupId } }),
+  );
+  const res = await fetch("/v1/topup/settle", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", "X-PAYMENT": xPayment },
+    body: JSON.stringify({ chainId }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    txHash?: string;
+    error?: string;
+  };
+  if (res.ok) return { ok: true, status: res.status, txHash: json.txHash };
+  const error =
+    res.status === 402
+      ? "Signature verification failed — make sure you signed with the funding wallet."
+      : res.status === 409
+        ? `Quote already settled${json.txHash ? ` (tx ${json.txHash.slice(0, 14)}…)` : ""}. Check your balance.`
+        : res.status === 429
+          ? "Rate limited — wait a moment and try again."
+          : res.status === 503
+            ? "Settlement service unavailable — try again shortly."
+            : json.error || `Settle failed (${res.status}).`;
+  return { ok: false, status: res.status, txHash: json.txHash, error };
 }
 
 // ── usage ───────────────────────────────────────────────────────────────────

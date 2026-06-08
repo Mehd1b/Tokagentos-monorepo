@@ -39,7 +39,15 @@ export function X402Page() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button type="button" className="btn btn-ghost">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() =>
+                document
+                  .getElementById("usage-history")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
               Usage history
             </button>
             <button type="button" className="btn btn-gold" onClick={openTopup}>

@@ -56,6 +56,14 @@ export function TopUpPanel({
   const liveAmount = credits.data
     ? formatAttoPtonString(credits.data.balance)
     : null;
+  // reserved (held against in-flight calls) + accrued (settled-but-unswept):
+  // surfaced under the balance only when the gateway returns live credits.
+  const liveReserved = credits.data
+    ? formatAttoPtonString(credits.data.reserved)
+    : null;
+  const liveAccrued = credits.data
+    ? formatAttoPtonString(credits.data.accrued)
+    : null;
 
   return (
     <div className="x402-grid">
@@ -86,6 +94,37 @@ export function TopUpPanel({
         <div className="bal-usd">
           {credits.live ? "funds LLM + agent-to-agent calls" : balance.usd}
         </div>
+
+        {/* reserved + accrued breakdown — live only (gateway returned credits) */}
+        {liveReserved !== null && liveAccrued !== null && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            <span
+              className="chip mute"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              reserved
+              <span className="mono" style={{ color: "var(--silver)" }}>
+                {liveReserved} PTON
+              </span>
+            </span>
+            <span
+              className="chip mute"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              accrued
+              <span className="mono" style={{ color: "var(--silver)" }}>
+                {liveAccrued} PTON
+              </span>
+            </span>
+          </div>
+        )}
 
         <div className="bal-bar">
           <div style={{ width: `${balance.spentPct}%` }} />

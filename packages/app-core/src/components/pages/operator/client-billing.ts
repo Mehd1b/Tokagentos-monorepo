@@ -165,6 +165,42 @@ export function fetchUsageSummary(params?: {
   return getJson<UsageSummaryResponse>(`/v1/usage/summary${q}`);
 }
 
+// ── usage: recent calls ──────────────────────────────────────────────────────
+export interface UsageCall {
+  id: string;
+  ts: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  costPton: string;
+  status: string;
+  apiKeyId: string | null;
+}
+
+export function fetchUsageCalls(
+  limit = 20,
+): Promise<{ calls: UsageCall[]; hasMore: boolean }> {
+  return getJson<{ calls: UsageCall[]; hasMore: boolean }>(
+    `/v1/usage/calls?limit=${limit}`,
+  );
+}
+
+// ── usage: per-key rollup ────────────────────────────────────────────────────
+export interface UsageKeyRow {
+  apiKeyId: string | null;
+  name?: string;
+  callCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+  totalCostPton: string;
+}
+
+export function fetchUsageKeys(): Promise<{ items: UsageKeyRow[] }> {
+  return getJson<{ items: UsageKeyRow[] }>("/v1/usage/keys");
+}
+
 // ── api keys ────────────────────────────────────────────────────────────────
 export interface ApiKeyRowResponse {
   id: string;

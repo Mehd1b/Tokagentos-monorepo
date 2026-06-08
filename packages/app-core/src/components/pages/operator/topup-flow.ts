@@ -62,6 +62,7 @@ import {
 } from "./eip712";
 import {
   type ChainAddMeta,
+  decodeRevertReason,
   ensureChain,
   ethCall,
   ethGetBalance,
@@ -435,8 +436,35 @@ export async function runGetPton(
     await sendTxAndWait({ to: ton, data: encApprove(pton, amount) });
   }
 
-  // 3. Wrap TON → PTON (PTON.deposit pulls TON, mints PTON 1:1). (app.js L2380-2382)
+  // 3. Pre-flight the wrap via eth_call (from the user) so a contract-level
+  //    revert surfaces its reason instead of a blind on-chain failure. The
+  //    common cause is the approve not having landed (the allowance read above
+  //    can be stale right after a chain switch / on a lagging RPC) — if the
+  //    simulation reverts on allowance, (re)approve and re-simulate once.
   onStatus("Wrapping TON → PTON…");
+  try {
+    await ethCall({ to: pton, data: encDeposit(amount), from: user });
+  } catch (e) {
+    const reason = decodeRevertReason(e);
+    if (/allowance/i.test(reason)) {
+      // The sim says allowance is short. Re-read the REAL allowance with a
+      // reliable view call (no msg.sender dependency) — only (re)approve if it
+      // is genuinely short. If it is actually sufficient, the sim revert is a
+      // false negative from a wallet that ignores `from` in eth_call, so just
+      // proceed to the real deposit (which carries the true sender).
+      const live = await readAllowance(ton, user, pton);
+      if (live < amount) {
+        onStatus("Approving TON…");
+        await sendTxAndWait({ to: ton, data: encApprove(pton, amount) });
+      }
+    } else {
+      // A real, non-allowance revert (insufficient balance, paused, …) — surface
+      // the decoded reason instead of sending a doomed transaction.
+      throw new Error(`Wrap would revert: ${reason}`);
+    }
+  }
+
+  // 4. Wrap TON → PTON (PTON.deposit pulls TON, mints PTON 1:1). (app.js L2380-2382)
   await sendTxAndWait({ to: pton, data: encDeposit(amount) });
   onStatus(`Wrapped ${ptonFloat} PTON — you can deposit now.`, "ok");
 

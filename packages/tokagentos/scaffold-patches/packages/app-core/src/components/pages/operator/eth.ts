@@ -138,16 +138,59 @@ export async function ensureChain(
 // eth_call (two transports: wallet vs public RPC fetch).
 // ---------------------------------------------------------------------------
 
-/** `eth_call` via the injected wallet. Returns the raw `0x…` hex result. */
+/**
+ * `eth_call` via the injected wallet. Returns the raw `0x…` hex result. Pass
+ * `from` when simulating a state-changing call (e.g. transferFrom-backed
+ * deposits) so msg.sender-dependent checks (allowance/balance) evaluate against
+ * the real caller instead of the zero address.
+ */
 export async function ethCall(tx: {
   to: string;
   data: string;
+  from?: string;
 }): Promise<string> {
-  const hex = (await rpc("eth_call", [
-    { to: tx.to, data: tx.data },
-    "latest",
-  ])) as string;
+  const call: { to: string; data: string; from?: string } = {
+    to: tx.to,
+    data: tx.data,
+  };
+  if (tx.from) call.from = tx.from;
+  const hex = (await rpc("eth_call", [call, "latest"])) as string;
   return hex;
+}
+
+/**
+ * Best-effort decode of a revert reason from a wallet/RPC error: the standard
+ * `Error(string)` payload (selector 0x08c379a0) across the various provider
+ * error shapes, else the trimmed `execution reverted: …` message.
+ */
+export function decodeRevertReason(err: unknown): string {
+  const e = err as {
+    message?: string;
+    data?: unknown;
+    error?: { data?: unknown; message?: string };
+  } | null;
+  const nestedData = (e?.data as { data?: string } | undefined)?.data;
+  const dataHex =
+    (typeof e?.data === "string" && e.data) ||
+    (typeof nestedData === "string" && nestedData) ||
+    (typeof e?.error?.data === "string" && e.error.data) ||
+    "";
+  if (dataHex.startsWith("0x08c379a0") && dataHex.length >= 138) {
+    try {
+      const len = Number.parseInt(dataHex.slice(74, 138), 16);
+      const strHex = dataHex.slice(138, 138 + len * 2);
+      let s = "";
+      for (let i = 0; i < strHex.length; i += 2) {
+        s += String.fromCharCode(Number.parseInt(strHex.slice(i, i + 2), 16));
+      }
+      if (s) return s;
+    } catch {
+      /* fall through to message parsing */
+    }
+  }
+  const msg = e?.message || e?.error?.message || "";
+  const m = /execution reverted:?\s*(.*)/i.exec(msg);
+  return (m?.[1] || msg || "reverted").trim();
 }
 
 /**

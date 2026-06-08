@@ -2,10 +2,11 @@
  * x402 · API keys — HMAC key list for headless agents.
  * Ported from handoff_app/prototype/components/X402Lower.jsx (ApiKeys).
  *
- * Live: lists / mints / revokes real keys via /v1/keys; falls back to mock data
- * when the gateway is unavailable or the caller is unauthenticated. The list
- * endpoint never returns the secret (shown once on mint), so the displayed
- * value is a stable masked label derived from the key id.
+ * Real-data only: lists / mints / revokes real keys via /v1/keys. When the
+ * gateway is unavailable or the caller is unauthenticated the list shows an
+ * empty/"sign in" state — NO mock. The list endpoint never returns the secret
+ * (shown once on mint), so the displayed value is a stable masked label derived
+ * from the key id.
  *
  * Mint flow: the user names the key, then on mint the one-time plaintext secret
  * (sk-ai-…) is captured and shown ONCE in a reveal panel with a copy button and
@@ -23,17 +24,23 @@ import {
   revokeApiKey,
   useLive,
 } from "../client-billing";
-import { API_KEYS, type ApiKeyEntry } from "../mock";
 
-type KeyRow = ApiKeyEntry & { id?: string };
+/** Display shape for a key row (operator `ApiKeyEntry`, ids attached). */
+type KeyRow = {
+  id?: string;
+  name: string;
+  val: string;
+  meta: string;
+  live: boolean;
+};
 
 /** The one-time secret returned by mint — held in state only, never persisted. */
 type MintedKey = { id: string; name: string; key: string };
 
-export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
+export function ApiKeys() {
   const keysFetcher = useCallback(() => fetchApiKeys(), []);
   const { data, live: isLive, reload } = useLive(keysFetcher);
-  const shownKeys: KeyRow[] = data ? data.map(apiKeyRowToEntry) : keys;
+  const shownKeys: KeyRow[] = data ? data.map(apiKeyRowToEntry) : [];
 
   const [name, setName] = useState("");
   const [minting, setMinting] = useState(false);
@@ -61,7 +68,7 @@ export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
       setName("");
       reload();
     } catch {
-      // unauthenticated / gateway unavailable — keep the mock view, surface a hint.
+      // unauthenticated / gateway unavailable — surface a hint.
       setMintError("Mint failed — sign in to the gateway to issue real keys.");
     } finally {
       setMinting(false);
@@ -117,7 +124,7 @@ export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
           {isLive ? (
             <span className="chip ok">live</span>
           ) : (
-            <span className="chip mute">⟩ example values</span>
+            <span className="chip mute">no data</span>
           )}
           <div
             className="amount-field"
@@ -232,6 +239,15 @@ export function ApiKeys({ keys = API_KEYS }: { keys?: ApiKeyEntry[] } = {}) {
       )}
 
       <div className="card keys-card">
+        {shownKeys.length === 0 && (
+          <div className="key-row" style={{ color: "var(--muted)" }}>
+            <span className="mono" style={{ fontSize: 12 }}>
+              {isLive
+                ? "No API keys yet — mint one above to authenticate headless agents."
+                : "Sign in to the gateway to view and mint API keys."}
+            </span>
+          </div>
+        )}
         {shownKeys.map((k) => {
           const pending = k.id != null && confirmId === k.id;
           const isRevoking = k.id != null && revokingId === k.id;

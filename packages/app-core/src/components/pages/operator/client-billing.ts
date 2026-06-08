@@ -136,6 +136,41 @@ export async function settleTopup(
   return { ok: false, status: res.status, txHash: json.txHash, error };
 }
 
+// ── price (TON/USD) ───────────────────────────────────────────────────────────
+export interface PriceResponse {
+  /** TON price in USD (FLAT field — NOT snapshot.tonUsd). */
+  tonUsd: number;
+  source?: string;
+  ageMs?: number;
+}
+
+/** GET /v1/price — the live TON/USD rate used to value PTON balances. */
+export function fetchPrice(): Promise<PriceResponse> {
+  return getJson<PriceResponse>("/v1/price");
+}
+
+// ── active model ──────────────────────────────────────────────────────────────
+export interface ActiveModelResponse {
+  /** Gateway-wide active model id, or null when none is pinned. */
+  active: string | null;
+  /** Catalogue of selectable models, when the gateway reports it. */
+  models?: string[];
+}
+
+/** GET /v1/model — the gateway-wide active model + (optionally) the catalogue. */
+export function getActiveModel(): Promise<ActiveModelResponse> {
+  return getJson<ActiveModelResponse>("/v1/model");
+}
+
+/** PUT /v1/model — pin the gateway-wide active model. */
+export async function setActiveModel(model: string): Promise<void> {
+  await getJson<unknown>("/v1/model", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+}
+
 // ── usage ───────────────────────────────────────────────────────────────────
 export interface UsageModelRow {
   model: string;

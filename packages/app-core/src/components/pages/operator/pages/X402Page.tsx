@@ -1,29 +1,35 @@
 /**
- * x402 page — top-up credits + agent-to-agent network. The centerpiece.
+ * x402 page — the inline, real-data billing surface.
  *
- * Page composition only: the page head plus the x402 sub-sections, each a
- * separate component under ../x402. AgentNetwork renders SettlementFeed itself,
- * so it is NOT composed here. Ported from
- * handoff_app/prototype/components/X402Page.jsx (X402Page).
- *
- * Top-up is NATIVE: "Top up" / "Deposit" open ../x402/TopupFlow, which runs the
- * real EIP-3009 quote → eth_signTypedData_v4 → settle flow in the operator's own
- * design via window.ethereum. It no longer borrows the old BillingPageView, so
- * nothing here depends on a page the operator is meant to replace. A successful
- * deposit bumps refreshKey to remount TopUpPanel and re-fetch the live balance.
+ * Composition only. The page holds the funding-wallet address, the selected
+ * top-up chain (persisted in sessionStorage), and a refreshKey bumped after a
+ * successful deposit so the balance re-fetches. Everything is inline (no modal):
+ * a wallet/network row, a 2-col balance + native EIP-3009 top-up card, the active
+ * model picker, usage analytics and API keys — each a self-contained sibling
+ * under ../x402, driven only by live /v1/* data.
  */
 import { useState } from "react";
-import { AgentNetwork } from "../x402/AgentNetwork";
 import { ApiKeys } from "../x402/ApiKeys";
-import { ServiceDirectory } from "../x402/ServiceDirectory";
-import { TopUpPanel } from "../x402/TopUpPanel";
-import { TopupFlow } from "../x402/TopupFlow";
+import { BalanceCard } from "../x402/BalanceCard";
+import { ModelPicker } from "../x402/ModelPicker";
+import { NetworkSwitcher } from "../x402/NetworkSwitcher";
+import { TopUpCard } from "../x402/TopUpCard";
 import { UsageChart } from "../x402/UsageChart";
+import { WalletConnectBar } from "../x402/WalletConnectBar";
+
+/** Read the persisted top-up chain, defaulting to Base (8453). */
+function initialChainId(): number {
+  try {
+    return Number(sessionStorage.getItem("op.x402.chain")) || 8453;
+  } catch {
+    return 8453;
+  }
+}
 
 export function X402Page() {
-  const [topupOpen, setTopupOpen] = useState(false);
+  const [address, setAddress] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number>(initialChainId);
   const [refreshKey, setRefreshKey] = useState(0);
-  const openTopup = () => setTopupOpen(true);
 
   return (
     <div className="page">
@@ -31,48 +37,61 @@ export function X402Page() {
         <div className="page-head">
           <div>
             <div className="page-eyebrow">x402 · pay-per-call rail</div>
-            <h1 className="page-title">Credits &amp; Agent Network</h1>
+            <h1 className="page-title">Credits &amp; Billing</h1>
             <p className="page-sub">
               Fund LLM calls and agent-to-agent payments in PTON — no account,
               no subscription. Every call settles on-chain via EIP-3009 against
               your ClaudeVault balance.
             </p>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() =>
-                document
-                  .getElementById("usage-history")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-            >
-              Usage history
-            </button>
-            <button type="button" className="btn btn-gold" onClick={openTopup}>
-              Top up
-            </button>
-          </div>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() =>
+              document
+                .getElementById("usage-history")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+          >
+            Usage history
+          </button>
         </div>
 
-        <TopUpPanel key={refreshKey} onTopUp={openTopup} />
+        {/* Wallet + network row */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 14,
+            flexWrap: "wrap",
+            marginBottom: 18,
+          }}
+        >
+          <WalletConnectBar address={address} onConnect={setAddress} />
+          <NetworkSwitcher
+            chainId={chainId}
+            onChange={setChainId}
+            address={address}
+          />
+        </div>
 
-        <AgentNetwork />
+        {/* Balance + top-up */}
+        <div className="x402-grid">
+          <BalanceCard chainId={chainId} refreshKey={refreshKey} />
+          <TopUpCard
+            address={address}
+            chainId={chainId}
+            onDeposited={() => setRefreshKey((k) => k + 1)}
+          />
+        </div>
 
-        <ServiceDirectory />
+        <ModelPicker />
 
         <UsageChart />
 
         <ApiKeys />
       </div>
-
-      {topupOpen && (
-        <TopupFlow
-          onClose={() => setTopupOpen(false)}
-          onDeposited={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
     </div>
   );
 }

@@ -1,10 +1,11 @@
 /**
- * Operator x402 — usage & spend analytics: 30-day spend bar chart + spend-by-model
- * breakdown, plus a recent-calls table and a per-API-key rollup. Ported from
- * handoff_app/prototype/components/X402Lower.jsx (UsageAnalytics) and extended
- * with the /v1/usage/calls + /v1/usage/keys seams.
+ * Operator x402 — usage & spend analytics: spend bar chart + spend-by-model
+ * breakdown, a recent-calls table and a per-API-key rollup. Real-data only,
+ * driven entirely by the /v1/usage/* seams (summary / calls / keys). When the
+ * gateway returns nothing (unauthenticated / unavailable) each section shows an
+ * empty/"sign in" state — NO mock. Self-contained: ../client-billing only.
  */
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import {
   fetchUsageCalls,
   fetchUsageKeys,
@@ -14,13 +15,6 @@ import {
   type UsageKeyRow,
   useLive,
 } from "../client-billing";
-import {
-  makeUsageSeries,
-  SPEND_MODELS,
-  type SpendModel,
-  USAGE_TOTALS,
-  type UsageTotals,
-} from "../mock";
 
 /** Bar-fill gradients applied to live spend-by-model rows, by position. */
 const MODEL_COLORS = [
@@ -62,149 +56,54 @@ function statusChip(status: string): "ok" | "info" | "mute" {
   return "mute";
 }
 
-/** Deterministic, empty-safe mock for the recent-calls table. */
-const MOCK_CALLS: UsageCall[] = [
-  {
-    id: "c-1",
-    ts: new Date(Date.now() - 2 * 60_000).toISOString(),
-    model: "claude-sonnet-4-5",
-    inputTokens: 1840,
-    outputTokens: 612,
-    costUsd: 0.021,
-    costPton: "41600000000000000",
-    status: "ok",
-    apiKeyId: "k-prod",
-  },
-  {
-    id: "c-2",
-    ts: new Date(Date.now() - 11 * 60_000).toISOString(),
-    model: "claude-opus-4-7",
-    inputTokens: 5120,
-    outputTokens: 2304,
-    costUsd: 0.144,
-    costPton: "285000000000000000",
-    status: "ok",
-    apiKeyId: "k-research",
-  },
-  {
-    id: "c-3",
-    ts: new Date(Date.now() - 47 * 60_000).toISOString(),
-    model: "gpt-5.2",
-    inputTokens: 980,
-    outputTokens: 140,
-    costUsd: 0.004,
-    costPton: "7900000000000000",
-    status: "pending",
-    apiKeyId: "k-ci",
-  },
-  {
-    id: "c-4",
-    ts: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-    model: "llama-4-405b",
-    inputTokens: 3210,
-    outputTokens: 88,
-    costUsd: 0.0,
-    costPton: "0",
-    status: "error",
-    apiKeyId: "k-ci",
-  },
-];
-
-/** Deterministic, empty-safe mock for the by-API-key rollup. */
-const MOCK_KEYS: UsageKeyRow[] = [
-  {
-    apiKeyId: "k-prod",
-    name: "treasurer · prod",
-    callCount: 1284,
-    totalInputTokens: 2_410_000,
-    totalOutputTokens: 812_400,
-    totalCostUsd: 96.4,
-    totalCostPton: "190900000000000000000",
-  },
-  {
-    apiKeyId: "k-research",
-    name: "research worker",
-    callCount: 612,
-    totalInputTokens: 1_180_000,
-    totalOutputTokens: 540_200,
-    totalCostUsd: 52.1,
-    totalCostPton: "103200000000000000000",
-  },
-  {
-    apiKeyId: "k-ci",
-    name: "ci · smoke tests",
-    callCount: 88,
-    totalInputTokens: 64_200,
-    totalOutputTokens: 9_140,
-    totalCostUsd: 3.7,
-    totalCostPton: "7300000000000000000",
-  },
-];
-
-export function UsageChart({
-  totals = USAGE_TOTALS,
-  models = SPEND_MODELS,
-}: {
-  totals?: UsageTotals;
-  models?: SpendModel[];
-} = {}) {
-  // 30-day spend bars (deterministic mock — stable bar ids so the chart key
-  // isn't the raw array index).
-  const mockBars = useMemo(
-    () => makeUsageSeries(30).map((value, i) => ({ value, id: `bar-${i}` })),
-    [],
+/** Live/empty section indicator — a small chip, never "example values". */
+function liveChip(isLive: boolean) {
+  return isLive ? (
+    <span className="chip ok">live</span>
+  ) : (
+    <span className="chip mute">no data</span>
   );
+}
 
-  // Live usage & spend (GET /v1/usage/summary); falls back to mock when the
-  // gateway is unavailable / unauthenticated. byModel / byDay are used only
-  // when the gateway returns them.
-  const usageFetcher = useCallback(() => fetchUsageSummary(), []);
-  const usage = useLive(usageFetcher);
+export function UsageChart() {
+  // Live usage & spend (GET /v1/usage/summary). byModel / byDay drive the
+  // chart and the spend-by-model breakdown when present.
+  const usage = useLive(fetchUsageSummary);
   const u = usage.data;
 
   // Recent calls (GET /v1/usage/calls) — small page, newest first.
-  const callsFetcher = useCallback(() => fetchUsageCalls(12), []);
-  const callsLive = useLive(callsFetcher);
-  const calls: UsageCall[] =
-    callsLive.data && callsLive.data.calls.length > 0
-      ? callsLive.data.calls
-      : MOCK_CALLS;
+  const callsLive = useLive(useMemo(() => () => fetchUsageCalls(12), []));
+  const calls: UsageCall[] = callsLive.data?.calls ?? [];
 
   // Per-API-key rollup (GET /v1/usage/keys).
-  const keysFetcher = useCallback(() => fetchUsageKeys(), []);
-  const keysLive = useLive(keysFetcher);
-  const keyRows: UsageKeyRow[] =
-    keysLive.data && keysLive.data.items.length > 0
-      ? keysLive.data.items
-      : MOCK_KEYS;
-
-  const shownTotals: UsageTotals = u
-    ? {
-        total: formatAttoPtonString(u.totalCostPton),
-        usd: `≈ $${Number(u.totalCostUsd).toFixed(2)}`,
-        avg: `${
-          u.callCount > 0
-            ? (Number(u.totalCostPton) / 1e18 / u.callCount).toFixed(3)
-            : "0.000"
-        } / call avg`,
-      }
-    : totals;
+  const keysLive = useLive(fetchUsageKeys);
+  const keyRows: UsageKeyRow[] = keysLive.data?.items ?? [];
 
   const totalPton = u ? Number(u.totalCostPton) || 1 : 1;
-  const shownModels: SpendModel[] =
+  const totalStr = u ? formatAttoPtonString(u.totalCostPton) : "—";
+  const totalUsd = u ? `≈ $${Number(u.totalCostUsd).toFixed(2)}` : "—";
+  const avgStr = u
+    ? `${
+        u.callCount > 0
+          ? (Number(u.totalCostPton) / 1e18 / u.callCount).toFixed(3)
+          : "0.000"
+      } / call avg`
+    : "—";
+
+  const models =
     u?.byModel && u.byModel.length > 0
       ? u.byModel.map((m, i) => ({
           name: m.model,
           pct: Math.round((Number(m.costPton) / totalPton) * 100),
           color: MODEL_COLORS[i % MODEL_COLORS.length],
         }))
-      : models;
+      : [];
 
   const bars =
     u?.byDay && u.byDay.length > 0
       ? u.byDay.map((d, i) => ({ value: Math.max(2, d.calls), id: `bar-${i}` }))
-      : mockBars;
-  const max = Math.max(...bars.map((b) => b.value));
+      : [];
+  const max = bars.length > 0 ? Math.max(...bars.map((b) => b.value)) : 1;
 
   return (
     <>
@@ -214,19 +113,10 @@ export function UsageChart({
             <span className="num">USE</span> Usage &amp; spend
           </div>
           <div className="sec-sub">
-            PTON spent per day across LLM and agent-to-agent calls · last 30
-            days.
+            PTON spent per day across LLM and agent-to-agent calls.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {usage.live ? (
-            <span className="chip ok">live</span>
-          ) : (
-            <span className="chip mute">⟩ example values</span>
-          )}
-          <span className="chip mute">30d</span>
-          <span className="chip mute">90d</span>
-        </div>
+        {liveChip(usage.live)}
       </div>
 
       <div className="usage-grid">
@@ -248,7 +138,7 @@ export function UsageChart({
                   letterSpacing: "0.08em",
                 }}
               >
-                total · 30d
+                total spend
               </div>
               <div
                 className="mono"
@@ -258,7 +148,7 @@ export function UsageChart({
                   marginTop: 4,
                 }}
               >
-                {shownTotals.total}{" "}
+                {totalStr}{" "}
                 <span style={{ fontSize: 14, color: "var(--gold-hi)" }}>
                   PTON
                 </span>
@@ -269,7 +159,7 @@ export function UsageChart({
                 className="mono"
                 style={{ fontSize: 11, color: "var(--muted)" }}
               >
-                {shownTotals.usd}
+                {totalUsd}
               </div>
               <div
                 className="mono"
@@ -279,93 +169,103 @@ export function UsageChart({
                   marginTop: 4,
                 }}
               >
-                {shownTotals.avg}
+                {avgStr}
               </div>
             </div>
           </div>
 
           <div className="chart-wrap">
-            <svg
-              viewBox="0 0 600 180"
-              width="100%"
-              height="180"
-              preserveAspectRatio="none"
-              style={{ overflow: "visible" }}
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="bar-g" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f3ba2f" />
-                  <stop offset="100%" stopColor="#d8a000" />
-                </linearGradient>
-              </defs>
-              {bars.map((bar, i) => {
-                const bw = 600 / bars.length;
-                const h = (bar.value / max) * 150;
-                return (
-                  <rect
-                    key={bar.id}
-                    x={i * bw + 2}
-                    y={160 - h}
-                    width={bw - 4}
-                    height={h}
-                    rx={2}
-                    fill="url(#bar-g)"
-                    opacity={
-                      i === bars.length - 1 ? 1 : 0.55 + (i / bars.length) * 0.3
-                    }
-                  />
-                );
-              })}
-              <line
-                x1="0"
-                y1="160"
-                x2="600"
-                y2="160"
-                stroke="var(--border)"
-                strokeWidth="1"
-              />
-            </svg>
+            {bars.length > 0 ? (
+              <svg
+                viewBox="0 0 600 180"
+                width="100%"
+                height="180"
+                preserveAspectRatio="none"
+                style={{ overflow: "visible" }}
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="bar-g" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f3ba2f" />
+                    <stop offset="100%" stopColor="#d8a000" />
+                  </linearGradient>
+                </defs>
+                {bars.map((bar, i) => {
+                  const bw = 600 / bars.length;
+                  const h = (bar.value / max) * 150;
+                  return (
+                    <rect
+                      key={bar.id}
+                      x={i * bw + 2}
+                      y={160 - h}
+                      width={bw - 4}
+                      height={h}
+                      rx={2}
+                      fill="url(#bar-g)"
+                      opacity={
+                        i === bars.length - 1
+                          ? 1
+                          : 0.55 + (i / bars.length) * 0.3
+                      }
+                    />
+                  );
+                })}
+                <line
+                  x1="0"
+                  y1="160"
+                  x2="600"
+                  y2="160"
+                  stroke="var(--border)"
+                  strokeWidth="1"
+                />
+              </svg>
+            ) : (
+              <div
+                style={{
+                  height: 180,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "var(--muted)",
+                  fontSize: 13,
+                }}
+              >
+                {usage.live
+                  ? "No usage yet — spend appears here as your agents make calls."
+                  : "Sign in to the gateway to view usage."}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="card">
           <div className="card-label">Spend by model</div>
-          <div className="usage-models">
-            {shownModels.map((m) => (
-              <div key={m.name} className="model-row">
-                <div className="model-row-top">
-                  <span className="model-name">{m.name}</span>
-                  <span className="model-pct">{m.pct}%</span>
+          {models.length > 0 ? (
+            <div className="usage-models">
+              {models.map((m) => (
+                <div key={m.name} className="model-row">
+                  <div className="model-row-top">
+                    <span className="model-name">{m.name}</span>
+                    <span className="model-pct">{m.pct}%</span>
+                  </div>
+                  <div className="model-bar">
+                    <div style={{ width: `${m.pct}%`, background: m.color }} />
+                  </div>
                 </div>
-                <div className="model-bar">
-                  <div style={{ width: `${m.pct}%`, background: m.color }} />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div
-            style={{
-              marginTop: 18,
-              paddingTop: 14,
-              borderTop: "1px dashed var(--border)",
-              display: "flex",
-              justifyContent: "space-between",
-            }}
-          >
-            <span
+              ))}
+            </div>
+          ) : (
+            <div
               className="mono"
-              style={{ fontSize: 11, color: "var(--muted)" }}
+              style={{
+                marginTop: 14,
+                fontSize: 12,
+                color: "var(--muted)",
+              }}
             >
-              routed via LiteLLM
-            </span>
-            <span
-              className="mono"
-              style={{ fontSize: 11, color: "var(--silver)" }}
-            >
-              8 models
-            </span>
-          </div>
+              {usage.live ? "No model spend yet." : "Sign in to view spend."}
+            </div>
+          )}
         </div>
       </div>
 
@@ -380,11 +280,7 @@ export function UsageChart({
             Per-call usage history — model, tokens and PTON settled on-chain.
           </div>
         </div>
-        {callsLive.live ? (
-          <span className="chip ok">live</span>
-        ) : (
-          <span className="chip mute">⟩ example values</span>
-        )}
+        {liveChip(callsLive.live)}
       </div>
 
       <div className="svc-table">
@@ -404,7 +300,9 @@ export function UsageChart({
             style={{ gridTemplateColumns: "1fr", color: "var(--muted)" }}
           >
             <span className="mono" style={{ fontSize: 12 }}>
-              No calls yet — usage appears here as your agents spend.
+              {callsLive.live
+                ? "No calls yet — usage appears here as your agents spend."
+                : "Sign in to the gateway to view usage."}
             </span>
           </div>
         ) : (
@@ -451,11 +349,7 @@ export function UsageChart({
             Usage rolled up per HMAC key — calls, tokens and total PTON spent.
           </div>
         </div>
-        {keysLive.live ? (
-          <span className="chip ok">live</span>
-        ) : (
-          <span className="chip mute">⟩ example values</span>
-        )}
+        {liveChip(keysLive.live)}
       </div>
 
       <div className="svc-table">
@@ -474,7 +368,9 @@ export function UsageChart({
             style={{ gridTemplateColumns: "1fr", color: "var(--muted)" }}
           >
             <span className="mono" style={{ fontSize: 12 }}>
-              No keyed usage yet.
+              {keysLive.live
+                ? "No keyed usage yet."
+                : "Sign in to the gateway to view usage."}
             </span>
           </div>
         ) : (

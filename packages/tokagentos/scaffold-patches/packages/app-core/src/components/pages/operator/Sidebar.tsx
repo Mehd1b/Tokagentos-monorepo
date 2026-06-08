@@ -2,10 +2,25 @@
  * Operator sidebar — brand lockup, two nav sections (Agent / System), and a
  * wallet chip foot. Ported from handoff_app/prototype/components/Shell.jsx.
  */
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect } from "react";
+import { useAuth } from "./auth";
 import { KeyMark } from "./brand/KeyMark";
-import { OPERATOR_ADDRESS_SHORT, VAULT_BALANCE } from "./mock";
+import { fetchCredits, formatAttoPtonString, useLive } from "./client-billing";
 import type { OperatorPage } from "./OperatorShell";
+
+/** The x402 top-up chain the user last selected (persisted by X402Page). */
+function sidebarChainId(): number {
+  try {
+    return Number(sessionStorage.getItem("op.x402.chain")) || 8453;
+  } catch {
+    return 8453;
+  }
+}
+
+/** 0x1234…cdef short form of a wallet address. */
+function shortAddr(addr: string): string {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
 
 const NAV_ICONS: Record<OperatorPage, ReactNode> = {
   chat: (
@@ -102,8 +117,9 @@ interface NavEntry {
 const AGENT_NAV: NavEntry[] = [
   { id: "chat", label: "Chat" },
   { id: "wallet", label: "Wallet" },
-  { id: "x402", label: "x402 Credits", badge: "1,284", badgeOk: false },
-  { id: "automations", label: "Automations", badge: "3", badgeOk: true },
+  // x402 badge is injected live from the gateway credit balance (see renderNav).
+  { id: "x402", label: "x402 Credits" },
+  { id: "automations", label: "Automations" },
 ];
 
 const SYSTEM_NAV: NavEntry[] = [
@@ -120,22 +136,50 @@ export function Sidebar({
   setPage: (page: OperatorPage) => void;
   brand: ReactNode;
 }) {
-  const renderNav = (entry: NavEntry) => (
-    <button
-      type="button"
-      key={entry.id}
-      className={`nav-item ${page === entry.id ? "is-active" : ""}`}
-      onClick={() => setPage(entry.id)}
-    >
-      <span className="nav-icon">{NAV_ICONS[entry.id]}</span>
-      {entry.label}
-      {entry.badge && (
-        <span className={`nav-badge ${entry.badgeOk ? "ok" : ""}`}>
-          {entry.badge}
-        </span>
-      )}
-    </button>
+  // Live gateway credit balance + signed-in wallet — no hardcoded values.
+  const { wallet } = useAuth();
+  const fetchSidebarCredits = useCallback(
+    () => fetchCredits(sidebarChainId()),
+    [],
   );
+  const credits = useLive(fetchSidebarCredits);
+  // Keep it fresh (reflects a top-up) without a global event bus. useLive also
+  // re-fetches on sign-in/out.
+  const { reload } = credits;
+  useEffect(() => {
+    const iv = setInterval(reload, 30_000);
+    return () => clearInterval(iv);
+  }, [reload]);
+
+  const ptonBalance = credits.data
+    ? formatAttoPtonString(credits.data.balance)
+    : null;
+
+  const renderNav = (entry: NavEntry) => {
+    // The x402 entry shows the live credit balance (integer PTON) when available.
+    const badge =
+      entry.id === "x402"
+        ? ptonBalance
+          ? ptonBalance.split(".")[0]
+          : undefined
+        : entry.badge;
+    return (
+      <button
+        type="button"
+        key={entry.id}
+        className={`nav-item ${page === entry.id ? "is-active" : ""}`}
+        onClick={() => setPage(entry.id)}
+      >
+        <span className="nav-icon">{NAV_ICONS[entry.id]}</span>
+        {entry.label}
+        {badge && (
+          <span className={`nav-badge ${entry.badgeOk ? "ok" : ""}`}>
+            {badge}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="sidebar">
@@ -151,13 +195,14 @@ export function Sidebar({
         <div className="wallet-chip">
           <div className="wallet-chip-row">
             <span className="wallet-chip-addr">
-              <KeyMark size={14} /> {OPERATOR_ADDRESS_SHORT}
+              <KeyMark size={14} />{" "}
+              {wallet ? shortAddr(wallet) : "Not signed in"}
             </span>
             <span className="mode-tag">vault</span>
           </div>
           <div className="wallet-chip-bal">
             <span className="k">PTON balance</span>
-            <span className="v">{VAULT_BALANCE.amount}</span>
+            <span className="v">{ptonBalance ?? "—"}</span>
           </div>
         </div>
       </div>

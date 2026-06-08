@@ -3,24 +3,34 @@
  * Ported from handoff_app/prototype/components/Pages.jsx (ChatPage).
  *
  * Live: lists real dashboard conversations + their messages via the
- * TokagentClient singleton (`client.listConversations` / `getConversationMessages`),
- * sends through `sendConversationMessageStream`, and creates threads via
- * `createConversation` — same-origin/session auth, identical to the production
- * ChatView. The composer footer's model chip comes from `useActiveModel`
- * (GET /v1/model) and the x402 chip from the operator's live ClaudeVault
- * balance (GET /v1/credits/me). Falls back to {@link CHAT_THREADS} /
- * {@link CHAT_ACTION_KV} (the "⟩ example values" view) when the gateway is
- * unavailable or the caller is unauthenticated. Loading keeps the mock so the
- * page never blanks; the action card maps to the real `actionName` +
- * `actionCallbackHistory` lines when present.
+ * self-contained operator gateway (`fetchConversations` / `fetchMessages`),
+ * sends through the non-streaming `sendMessage` (the POST returns the agent's
+ * full reply synchronously), and creates threads via `createConversation` —
+ * same-origin/session auth, identical to the production ChatView. The composer
+ * footer's model chip uses a sensible default and the x402 chip comes from the
+ * operator's live ClaudeVault balance (GET /v1/credits/me). Falls back to
+ * {@link CHAT_THREADS} / {@link CHAT_ACTION_KV} (the "⟩ example values" view)
+ * when the gateway is unavailable or the caller is unauthenticated. Loading
+ * keeps the mock so the page never blanks; the action card maps to the real
+ * `actionName` + `actionCallbackHistory` lines when present.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { client } from "../../../../api/client";
-import type { ConversationMessage } from "../../../../api/client-types";
-import { useActiveModel } from "../../../../hooks/useActiveModel";
 import { KeyMark } from "../brand/KeyMark";
 import { fetchCredits, formatAttoPtonString, useLive } from "../client-billing";
+import {
+  createConversation,
+  fetchConversations,
+  fetchMessages,
+  type GwMessage,
+  sendMessage,
+} from "../client-gateway";
 import { CHAT_ACTION_KV, CHAT_THREADS, type ChatThread } from "../mock";
+
+/** Default model chip label (self-contained — no live /v1/model lookup). */
+const DEFAULT_MODEL = "claude-sonnet-4-5";
+
+/** Rendered message = gateway message + client-only optimistic flag. */
+type ChatMessage = GwMessage & { interrupted?: boolean };
 
 /** Live thread-rail row: mock {@link ChatThread} shape + the selection key. */
 type ThreadRow = ChatThread & { id: string };
@@ -56,11 +66,15 @@ export function ChatPage({
   // ── Thread rail (live conversations, mock fallback) ────────────────────────
   const threadsFetcher = useCallback(
     () =>
-      client.listConversations().then((r) =>
+      fetchConversations().then((r) =>
         r.conversations.map<ThreadRow>((c) => ({
           id: c.id,
-          name: c.title,
-          time: shortRelative(c.updatedAt),
+          name: c.title ?? "Conversation",
+          time: shortRelative(
+            typeof c.updatedAt === "number"
+              ? new Date(c.updatedAt).toISOString()
+              : c.updatedAt,
+          ),
         })),
       ),
     [],
@@ -82,7 +96,7 @@ export function ChatPage({
       : (shownThreads[0]?.id ?? null);
 
   // ── Message stream for the selected thread ─────────────────────────────────
-  const [messages, setMessages] = useState<ConversationMessage[] | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   useEffect(() => {
     // Only fetch real messages for real (non-mock) conversations.
     if (!threadsLive || !effectiveSelectedId) {
@@ -90,8 +104,7 @@ export function ChatPage({
       return;
     }
     let cancelled = false;
-    client
-      .getConversationMessages(effectiveSelectedId)
+    fetchMessages(effectiveSelectedId)
       .then((r) => {
         if (!cancelled) setMessages(r.messages);
       })
@@ -105,7 +118,7 @@ export function ChatPage({
 
   const messagesLive = threadsLive && messages !== null;
 
-  // ── Composer send (streaming, optimistic) ──────────────────────────────────
+  // ── Composer send (non-streaming, optimistic) ──────────────────────────────
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -116,28 +129,26 @@ export function ChatPage({
     setDraft("");
     const userId = `local-user-${Date.now()}`;
     const replyId = `local-reply-${Date.now()}`;
+    // Append the user bubble + an empty assistant placeholder immediately.
     setMessages((prev) => [
       ...(prev ?? []),
-      { id: userId, role: "user", text, timestamp: Date.now() },
-      { id: replyId, role: "assistant", text: "", timestamp: Date.now() },
+      { id: userId, role: "user", text },
+      { id: replyId, role: "assistant", text: "" },
     ]);
     try {
-      await client.sendConversationMessageStream(
-        effectiveSelectedId,
-        text,
-        (_token, accumulated) => {
-          setMessages((prev) =>
-            (prev ?? []).map((m) =>
-              m.id === replyId
-                ? { ...m, text: accumulated ?? m.text + _token }
-                : m,
-            ),
-          );
-        },
+      // Non-streaming send — the POST returns the agent's full reply.
+      const reply = await sendMessage(effectiveSelectedId, text);
+      setMessages((prev) =>
+        (prev ?? []).map((m) =>
+          m.id === replyId
+            ? {
+                ...m,
+                text: reply.text || reply.noResponseReason || "(no response)",
+                interrupted: !reply.text,
+              }
+            : m,
+        ),
       );
-      // Re-sync with the server's canonical message list (ids, action cards).
-      const fresh = await client.getConversationMessages(effectiveSelectedId);
-      setMessages(fresh.messages);
       reload();
     } catch {
       // Keep the optimistic bubbles; mark the empty reply as interrupted.
@@ -155,7 +166,7 @@ export function ChatPage({
 
   const onNewConversation = useCallback(async () => {
     try {
-      const { conversation } = await client.createConversation();
+      const { conversation } = await createConversation();
       setSelectedId(conversation.id);
       reload();
     } catch {
@@ -164,7 +175,6 @@ export function ChatPage({
   }, [reload]);
 
   // ── Composer footer chips (model + x402 PTON balance) ──────────────────────
-  const activeModel = useActiveModel();
   const creditsFetcher = useCallback(() => fetchCredits(), []);
   const { data: credits } = useLive(creditsFetcher);
   const ptonLabel = credits
@@ -374,9 +384,7 @@ export function ChatPage({
                               <div className="action-name">
                                 {m.actionName ?? "action"}
                               </div>
-                              <div className="action-sub">
-                                {m.source ?? "plugin action"}
-                              </div>
+                              <div className="action-sub">plugin action</div>
                             </div>
                             <span className="chip ok">read</span>
                           </div>
@@ -438,7 +446,7 @@ export function ChatPage({
             </div>
             <div className="composer-hint">
               <span>vault mode · actions need approval</span>
-              <span>{activeModel ?? "claude-sonnet-4-5"}</span>
+              <span>{DEFAULT_MODEL}</span>
               <span>x402 · {ptonLabel}</span>
             </div>
           </div>

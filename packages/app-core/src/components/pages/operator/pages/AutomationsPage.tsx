@@ -3,19 +3,19 @@
  * Ported from handoff_app/prototype/components/Pages.jsx (AutomationsPage).
  *
  * Live: lists the real unified automations (coordinator tasks + triggers + n8n
- * workflows) via `client.listAutomations()` — the same source the production
- * AutomationsView renders — and toggles a card by arming/pausing its backing
- * trigger via `client.updateTrigger(triggerId, { enabled })`. Falls back to the
+ * workflows) via `fetchAutomations()` — the same `/api/automations` source the
+ * production AutomationsView renders — and toggles a card by arming/pausing its
+ * backing trigger via `setTriggerEnabled(triggerId, enabled)`. Falls back to the
  * mock AUTOMATIONS list when the agent runtime is unavailable or the caller is
  * unauthenticated (`/api/automations` throws without a runtime).
  */
 import { useCallback, useEffect, useState } from "react";
-import { client } from "../../../../api/client";
-import type {
-  AutomationItem,
-  AutomationListResponse,
-} from "../../../../api/client-types-config";
 import { useLive } from "../client-billing";
+import {
+  fetchAutomations,
+  type GwAutomation,
+  setTriggerEnabled,
+} from "../client-gateway";
 import { AUTOMATIONS, type AutomationEntry } from "../mock";
 
 /** Operator card shape with the optional backing trigger id for toggling. */
@@ -37,16 +37,18 @@ function shortAgo(iso: string | null | undefined): string {
 }
 
 /** Build the trigger-condition string, mirroring the main view's schedule text. */
-function triggerCondition(item: AutomationItem): string {
+function triggerCondition(item: GwAutomation): string {
   const t = item.trigger;
   if (t) {
-    if (t.triggerType === "cron" && t.cronExpression) {
+    // No discrete triggerType on the summary — derive it from the schedule
+    // field that is present (cron → interval → once), matching the routes.
+    if (t.cronExpression) {
       return `EVERY ${t.cronExpression}`;
     }
-    if (t.triggerType === "interval" && t.intervalMs) {
+    if (t.intervalMs) {
       return `EVERY ${t.intervalMs}ms`;
     }
-    if (t.triggerType === "once" && t.scheduledAtIso) {
+    if (t.scheduledAtIso) {
       return `ONCE at ${t.scheduledAtIso}`;
     }
     if (t.instructions) return t.instructions;
@@ -55,7 +57,7 @@ function triggerCondition(item: AutomationItem): string {
 }
 
 /** Last-run footer, derived from the backing trigger or item timestamps. */
-function lastRun(item: AutomationItem): string {
+function lastRun(item: GwAutomation): string {
   const t = item.trigger;
   if (t?.lastRunAtIso) {
     const ago = shortAgo(t.lastRunAtIso);
@@ -65,18 +67,18 @@ function lastRun(item: AutomationItem): string {
 }
 
 /** Derive a glyph from the automation type/source (no backend emoji field). */
-function glyphFor(item: AutomationItem): string {
+function glyphFor(item: GwAutomation): string {
   if (item.type === "n8n_workflow") return "🧩";
-  const tt = item.trigger?.triggerType;
-  if (tt === "cron" || tt === "interval" || tt === "once") return "⏱️";
+  const t = item.trigger;
+  if (t && (t.cronExpression || t.intervalMs || t.scheduledAtIso)) return "⏱️";
   return "🤖";
 }
 
-/** Map a real AutomationItem to the operator `AutomationEntry` display shape. */
-function automationItemToRow(item: AutomationItem): AutomationRow {
+/** Map a real GwAutomation to the operator `AutomationEntry` display shape. */
+function automationItemToRow(item: GwAutomation): AutomationRow {
   return {
     glyph: glyphFor(item),
-    name: item.title,
+    name: item.title ?? item.id,
     trigger: triggerCondition(item),
     last: lastRun(item),
     on: item.enabled,
@@ -90,7 +92,7 @@ export function AutomationsPage({
   automations?: AutomationEntry[];
 } = {}) {
   const fetcher = useCallback(
-    (): Promise<AutomationListResponse> => client.listAutomations(),
+    (): Promise<{ automations: GwAutomation[] }> => fetchAutomations(),
     [],
   );
   const { data, live: isLive, reload } = useLive(fetcher);
@@ -119,8 +121,7 @@ export function AutomationsPage({
       const row = shownAutomations[i];
       if (!isLive || !row?.triggerId) return; // mock view or non-trigger item
       const triggerId = row.triggerId;
-      client
-        .updateTrigger(triggerId, { enabled: next })
+      setTriggerEnabled(triggerId, next)
         .then(() => reload())
         .catch(() => {
           // unauthenticated / runtime unavailable — revert the optimistic flip

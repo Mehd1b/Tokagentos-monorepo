@@ -2,56 +2,56 @@
  * Operator Plugins page — runtime extensions you can mount into the agent.
  * Ported from handoff_app/prototype/components/Shell.jsx (PluginsPage).
  *
- * Live: lists the real plugin registry via the agent compat API
- * (client.getPlugins → GET /api/plugins) and toggles plugins
- * (client.updatePlugin → PUT /api/plugins/:id { enabled }), mirroring the
+ * Live: lists the real plugin registry via the self-contained operator gateway
+ * (fetchPlugins → GET /api/plugins) and toggles plugins
+ * (setPluginEnabled → PUT /api/plugins/:id { enabled }), mirroring the
  * main app's PluginsView. Falls back to mock PLUGINS when the agent server is
  * unavailable or the caller is unauthenticated. The same-origin agent server
- * mounts /api/plugins alongside the operator SPA, so the TokagentClient's
+ * mounts /api/plugins alongside the operator SPA, so the gateway's
  * base-url-aware fetch reaches it just like the billing helpers reach /v1/*.
  *
- * Always-on core plugins, database plugins, and hidden connectors are filtered
- * out (same rule as buildPluginListState) so the card grid surfaces only the
- * user-mountable extensions rather than ~25 internal core plugins.
+ * Database plugins (and plugins with no published package) are filtered out so
+ * the card grid surfaces only the user-mountable extensions rather than the
+ * internal core plugins.
  */
 import { useCallback, useState } from "react";
-import { client, type PluginInfo } from "../../../../api";
-import {
-  ALWAYS_ON_PLUGIN_IDS,
-  subgroupForPlugin,
-  VISIBLE_CONNECTOR_IDS,
-} from "../../plugin-list-utils";
 import { useLive } from "../client-billing";
+import {
+  fetchPlugins,
+  type GwPlugin,
+  setPluginEnabled,
+} from "../client-gateway";
 import { PLUGINS, type PluginEntry } from "../mock";
 
 /** Operator-card display shape (superset of the mock PluginEntry). */
 type PluginCard = PluginEntry & { id: string };
 
-/** Same visibility rule as buildPluginListState's categoryPlugins filter. */
-function isMountable(p: PluginInfo): boolean {
+/**
+ * Minimal visibility filter (inlined — replaces the former plugin-list-utils
+ * helpers). Drop database plugins; the card grid surfaces only user-mountable
+ * extensions.
+ */
+function isMountable(p: GwPlugin): boolean {
   if (p.category === "database") return false;
-  if (ALWAYS_ON_PLUGIN_IDS.has(p.id)) return false;
-  if (p.category === "connector" && !VISIBLE_CONNECTOR_IDS.has(p.id)) {
-    return false;
-  }
   return true;
 }
 
-/** Map a real PluginInfo to the operator card display shape. */
-function pluginInfoToCard(p: PluginInfo): PluginCard {
+/** Map a real GwPlugin to the operator card display shape. */
+function pluginInfoToCard(p: GwPlugin): PluginCard {
   return {
     id: p.id,
     // Real ids are bare ("telegram", "evm", "x402"); prefer the full package
     // name when present so the @tokagent/<name> header reads naturally.
     name: p.npmName ? p.npmName.replace(/^@tokagent\//, "") : p.id,
     desc: p.description,
-    kind: subgroupForPlugin(p),
+    // Derive the kind chip directly from the plugin category.
+    kind: p.category ?? "plugin",
     on: p.enabled,
   };
 }
 
 async function fetchPluginCards(): Promise<PluginCard[]> {
-  const { plugins } = await client.getPlugins();
+  const { plugins } = await fetchPlugins();
   return plugins.filter(isMountable).map(pluginInfoToCard);
 }
 
@@ -81,7 +81,7 @@ export function PluginsPage({
       setToggles((t) => ({ ...t, [card.id]: next }));
       if (!isLive) return; // mock view — local-only toggle, no backend call
       try {
-        await client.updatePlugin(card.id, { enabled: next });
+        await setPluginEnabled(card.id, next);
         reload();
       } catch {
         // Mutation failed (unauthorized / restart pending / gateway down) —

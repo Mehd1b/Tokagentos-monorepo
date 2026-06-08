@@ -3,20 +3,24 @@
  * Ported from handoff_app/prototype/components/Pages.jsx (SettingsPage).
  *
  * Live: the Environment (.env mirror) card is backed by the real agent server —
- * `client.getSecrets()` (GET /api/secrets) supplies every env-backed secret with
+ * `fetchSecrets()` (GET /api/secrets) supplies every env-backed secret with
  * its set-status and a server-masked value (the same source SecretsView renders),
- * and `client.getConfig()` (GET /api/config) supplies the config-style env rows
+ * and `fetchConfig()` (GET /api/config) supplies the config-style env rows
  * (execution mode, gateway url, vault address). The three behavior toggles seed
  * their on/off state from matching real config flags and write back via
- * `client.updateConfig(patch)` (PUT /api/config) with an optimistic flip. Falls
+ * `updateConfig(patch)` (PUT /api/config) with an optimistic flip. Falls
  * back to the mock {@link ENV_ROWS}/{@link SETTING_TOGGLES} when the agent runtime
  * is unavailable or the caller is unauthenticated. id/name/desc copy on the
  * toggles is presentational and stays static.
  */
 import { useCallback, useEffect, useState } from "react";
-import { client } from "../../../../api/client";
-import type { SecretInfo } from "../../../../api/client-types-config";
 import { useLive } from "../client-billing";
+import {
+  fetchConfig,
+  fetchSecrets,
+  type GwSecret,
+  updateConfig,
+} from "../client-gateway";
 import {
   ENV_ROWS,
   type EnvRow,
@@ -26,18 +30,18 @@ import {
 
 /** Combined live source for the Environment card: secrets + raw config tree. */
 interface SettingsLive {
-  secrets: SecretInfo[];
+  secrets: GwSecret[];
   config: Record<string, unknown>;
 }
 
 async function fetchSettingsLive(): Promise<SettingsLive> {
-  // getSecrets is the canonical env-mirror source; getConfig backs the
-  // config-style env rows + toggle flags. getConfig is best-effort: if it
+  // fetchSecrets is the canonical env-mirror source; fetchConfig backs the
+  // config-style env rows + toggle flags. fetchConfig is best-effort: if it
   // throws we still surface the (live) secrets with an empty config tree.
-  const { secrets } = await client.getSecrets();
+  const { secrets } = await fetchSecrets();
   let config: Record<string, unknown> = {};
   try {
-    config = await client.getConfig();
+    config = await fetchConfig();
   } catch {
     /* config unavailable — render secrets-only env rows */
   }
@@ -45,7 +49,7 @@ async function fetchSettingsLive(): Promise<SettingsLive> {
 }
 
 /** Map a real secret to the operator `EnvRow` display shape (mirror of apiKeyRowToEntry). */
-function secretToEnvRow(s: SecretInfo): EnvRow {
+function secretToEnvRow(s: GwSecret): EnvRow {
   return { k: s.key, v: s.maskedValue ?? "not set", ok: s.isSet };
 }
 
@@ -164,7 +168,7 @@ export function SettingsPage({
         (k) => typeof data.config[k] === "boolean",
       );
       if (!key) return; // no real backing — keep the local flip
-      client.updateConfig({ [key]: nextVal }).catch(() => {
+      updateConfig({ [key]: nextVal }).catch(() => {
         // unauthenticated / runtime unavailable — revert the optimistic flip
         setToggles((t) => ({ ...t, [id]: !t[id] }));
       });

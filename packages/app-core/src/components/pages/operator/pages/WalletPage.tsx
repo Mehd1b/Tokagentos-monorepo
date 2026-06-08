@@ -7,21 +7,24 @@
  * GET /api/wallet/addresses) via the operator `useLive` seam, falling back to
  * mock data when the routes are unavailable / unauthenticated / RPC unconfigured
  * (the routes return `{ evm: null, solana: null }`). Deliberately does NOT touch
- * TokagentClient / client.ts — mirroring the billing seam, the fetchers below
- * are self-contained same-origin `fetch` calls.
+ * TokagentClient / client.ts — all live data flows through the self-contained
+ * `client-gateway` helpers (bare same-origin `fetch`, no app-core imports), so
+ * the page ships identically into the monorepo dev surface and the published
+ * scaffold.
  *
  * Not live (no honest backend): the trust-boundary mode picker (WALLET_MODES)
  * is local UI state, and the per-row "Send" button has no one-click backend
  * (the only real transfer path is steward/BSC-gated) — both stay presentational.
  */
-import type {
-  EvmChainBalance,
-  WalletAddresses,
-  WalletBalancesResponse,
-} from "@tokagentos/shared/contracts";
 import { useCallback, useState } from "react";
-import { CHAIN_CONFIGS, resolveChainKey } from "../../../inventory/chainConfig";
 import { useLive } from "../client-billing";
+import {
+  chainMeta,
+  fetchWalletAddresses,
+  fetchWalletBalances,
+  type GwEvmChain,
+  type GwWalletBalances,
+} from "../client-gateway";
 import {
   CHAIN_BALANCES,
   type ChainBalance,
@@ -31,21 +34,6 @@ import {
   type WalletMode,
   type WalletModeInfo,
 } from "../mock";
-
-// ── live data seam (same-origin agent routes; mirrors client-billing.ts) ─────
-async function getWalletJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { credentials: "include" });
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return (await res.json()) as T;
-}
-
-function fetchWalletBalances(): Promise<WalletBalancesResponse> {
-  return getWalletJson<WalletBalancesResponse>("/api/wallet/balances");
-}
-
-function fetchWalletAddresses(): Promise<WalletAddresses> {
-  return getWalletJson<WalletAddresses>("/api/wallet/addresses");
-}
 
 /** Parse a decimal USD string ("1,328.42" / "1328.42") to a number, 0 on NaN. */
 function parseUsd(value: string | null | undefined): number {
@@ -74,8 +62,9 @@ function formatAmt(raw: string): string {
  * Operator chain-dot colours. The operator console only loads operator.css
  * (scoped under `.op-root`), which defines `--eth/--base/--arb/--op/--pol` —
  * NOT the `--color-chain-*` vars from the main app's styles.css. So we map the
- * canonical chainConfig key to the operator's own palette to preserve the
- * gold-on-jet design. Unknown chains fall back to the gold accent.
+ * canonical chain key (from client-gateway `chainMeta`) to the operator's own
+ * palette to preserve the gold-on-jet design. Unknown chains fall back to the
+ * gold accent.
  */
 const OP_CHAIN_COLORS: Record<string, string> = {
   ethereum: "var(--eth)",
@@ -87,13 +76,12 @@ const OP_CHAIN_COLORS: Record<string, string> = {
   bsc: "#f0b90b",
 };
 
-function chainColor(chainName: string): string {
-  const key = resolveChainKey(chainName);
-  return (key && OP_CHAIN_COLORS[key]) || "var(--gold)";
+function chainColor(key: string): string {
+  return OP_CHAIN_COLORS[key] || "var(--gold)";
 }
 
 /** Sum native + token USD for one EVM chain. */
-function evmChainUsd(c: EvmChainBalance): number {
+function evmChainUsd(c: GwEvmChain): number {
   return (
     parseUsd(c.nativeValueUsd) +
     c.tokens.reduce((s, t) => s + parseUsd(t.valueUsd), 0)
@@ -107,7 +95,7 @@ interface WalletRows {
 }
 
 /** Map the live wallet-balances response to the operator widget shapes. */
-function walletBalancesToRows(resp: WalletBalancesResponse): WalletRows {
+function walletBalancesToRows(resp: GwWalletBalances): WalletRows {
   const rows: ChainBalance[] = [];
   let totalUsd = 0;
 
@@ -115,13 +103,11 @@ function walletBalancesToRows(resp: WalletBalancesResponse): WalletRows {
     if (c.error !== null) continue; // skip per-chain RPC failures
     const usd = evmChainUsd(c);
     totalUsd += usd;
-    const key = resolveChainKey(c.chain);
-    const name = key ? CHAIN_CONFIGS[key].name.toLowerCase() : c.chain;
+    const meta = chainMeta(c.chainId);
     rows.push({
-      name,
-      short:
-        (key ? CHAIN_CONFIGS[key].nativeSymbol : c.nativeSymbol) || c.chain,
-      color: chainColor(c.chain),
+      name: meta.name.toLowerCase(),
+      short: c.nativeSymbol || meta.key,
+      color: chainColor(meta.key),
       amt: formatAmt(c.nativeBalance),
       sym: c.nativeSymbol,
       usd: formatUsd(usd),
@@ -129,15 +115,18 @@ function walletBalancesToRows(resp: WalletBalancesResponse): WalletRows {
   }
 
   if (resp.solana) {
-    const usd =
-      parseUsd(resp.solana.solValueUsd) +
-      resp.solana.tokens.reduce((s, t) => s + parseUsd(t.valueUsd), 0);
+    const tokens = resp.solana.tokens ?? [];
+    const usd = tokens.reduce((s, t) => s + parseUsd(t.valueUsd), 0);
     totalUsd += usd;
     rows.push({
       name: "solana",
       short: "SOL",
       color: OP_CHAIN_COLORS.solana,
-      amt: formatAmt(resp.solana.solBalance),
+      amt: formatAmt(
+        tokens
+          .reduce((s, t) => s + (Number.parseFloat(t.balance) || 0), 0)
+          .toString(),
+      ),
       sym: "SOL",
       usd: formatUsd(usd),
     });

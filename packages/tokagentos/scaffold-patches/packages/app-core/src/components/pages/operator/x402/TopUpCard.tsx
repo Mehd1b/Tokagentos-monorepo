@@ -12,6 +12,7 @@
  * Self-contained: ../eip712 + ../client-billing only (window.ethereum, no ethers).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "../auth";
 import {
   fetchTopupQuote,
   type SettleOutcome,
@@ -49,6 +50,7 @@ export function TopUpCard({
   const [secsLeft, setSecsLeft] = useState(0);
   const [requoteNonce, setRequoteNonce] = useState(0);
 
+  const { signedIn } = useAuth();
   const walletPresent = hasInjectedWallet();
   const busy = phase === "depositing";
 
@@ -57,9 +59,11 @@ export function TopUpCard({
   const quoteSeq = useRef(0);
   useEffect(() => {
     if (phase === "depositing" || phase === "done") return;
-    // The quote endpoint is auth-gated — don't fire it (and surface a raw 401)
-    // until a wallet is connected. Before connect, sit in the idle/connect state.
-    if (!address) {
+    // The quote endpoint is auth-gated behind the SIWE bearer token — connecting
+    // a wallet is NOT enough. Don't fire it (and surface a raw 401) until the
+    // user has signed in to the gateway; before that, sit in the idle state with
+    // a "sign in" hint (rendered below) instead of an error.
+    if (!signedIn) {
       setQuote(null);
       setPhase("idle");
       setError(null);
@@ -98,8 +102,11 @@ export function TopUpCard({
     return () => clearTimeout(t);
     // phase intentionally omitted to avoid re-quoting on every transition;
     // requoteNonce lets the expired-quote "Refresh" button force a re-quote.
+    // signedIn re-runs the effect (and fires the first quote) the moment the
+    // user signs in to the gateway. address is no longer read here (the guard is
+    // signedIn now), so it is intentionally out of the deps.
     // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
-  }, [address, amountUsd, chainId, requoteNonce]);
+  }, [signedIn, amountUsd, chainId, requoteNonce]);
 
   // Quote expiry countdown.
   useEffect(() => {
@@ -293,6 +300,24 @@ export function TopUpCard({
         </div>
       </div>
 
+      {/* Not signed in → muted "sign in to fund" hint (not an error). */}
+      {!signedIn && !busy && (
+        <div
+          className="mono"
+          style={{
+            marginTop: 12,
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid var(--border-strong)",
+            fontSize: 12,
+            color: "var(--muted)",
+          }}
+        >
+          Sign in to the gateway to fund.
+        </div>
+      )}
+
       {/* Inline status / error line */}
       {busy && (
         <div
@@ -331,15 +356,17 @@ export function TopUpCard({
         className="btn btn-gold btn-lg"
         style={{ marginTop: 14, width: "100%" }}
         onClick={expired ? () => setRequoteNonce((n) => n + 1) : onDeposit}
-        disabled={busy || !quote || phase === "quoting"}
+        disabled={busy || !signedIn || !quote || phase === "quoting"}
       >
         {!walletPresent
           ? "Connect a Web3 wallet to deposit"
-          : busy
-            ? "Signing & settling…"
-            : expired
-              ? "Refresh quote"
-              : `Deposit $${amountUsd || "0"} · gasless EIP-3009`}
+          : !signedIn
+            ? "Sign in to the gateway to deposit"
+            : busy
+              ? "Signing & settling…"
+              : expired
+                ? "Refresh quote"
+                : `Deposit $${amountUsd || "0"} · gasless EIP-3009`}
       </button>
       <div
         className="mono"

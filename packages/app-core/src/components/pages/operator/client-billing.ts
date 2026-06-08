@@ -15,11 +15,18 @@
  * The A2A network graph + service directory have no backend yet and stay mock.
  */
 import { useCallback, useEffect, useState } from "react";
+import { getToken, subscribeAuth } from "./auth";
 import type { Eip3009Authorization } from "./eip712";
 
 // ── low-level fetch ─────────────────────────────────────────────────────────
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: "include", ...init });
+  // The gateway's /v1 routes are auth-gated behind a SIWE bearer token. Attach
+  // it when the operator is signed in; keep credentials:"include" so the same
+  // call also works against cookie-auth gateways (the dashboard uses both).
+  const headers = new Headers(init?.headers);
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(path, { credentials: "include", ...init, headers });
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return (await res.json()) as T;
 }
@@ -112,10 +119,20 @@ export async function settleTopup(
   const xPayment = btoa(
     JSON.stringify({ payload: { signature, authorization, quoteId: topupId } }),
   );
+  // Settle is auth-gated — it cross-checks authorization.from === the authed
+  // wallet and rate-limits per wallet (topup-routes returns 401 otherwise).
+  // Attach the SIWE bearer alongside X-PAYMENT, exactly as app.js's api() does;
+  // without it the deposit 401s AFTER the user has already signed.
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-PAYMENT": xPayment,
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch("/v1/topup/settle", {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json", "X-PAYMENT": xPayment },
+    headers,
     body: JSON.stringify({ chainId }),
   });
   const json = (await res.json().catch(() => ({}))) as {
@@ -124,15 +141,17 @@ export async function settleTopup(
   };
   if (res.ok) return { ok: true, status: res.status, txHash: json.txHash };
   const error =
-    res.status === 402
-      ? "Signature verification failed — make sure you signed with the funding wallet."
-      : res.status === 409
-        ? `Quote already settled${json.txHash ? ` (tx ${json.txHash.slice(0, 14)}…)` : ""}. Check your balance.`
-        : res.status === 429
-          ? "Rate limited — wait a moment and try again."
-          : res.status === 503
-            ? "Settlement service unavailable — try again shortly."
-            : json.error || `Settle failed (${res.status}).`;
+    res.status === 401
+      ? "Sign in to the gateway and try again."
+      : res.status === 402
+        ? "Signature verification failed — make sure you signed with the funding wallet."
+        : res.status === 409
+          ? `Quote already settled${json.txHash ? ` (tx ${json.txHash.slice(0, 14)}…)` : ""}. Check your balance.`
+          : res.status === 429
+            ? "Rate limited — wait a moment and try again."
+            : res.status === 503
+              ? "Settlement service unavailable — try again shortly."
+              : json.error || `Settle failed (${res.status}).`;
   return { ok: false, status: res.status, txHash: json.txHash, error };
 }
 
@@ -336,15 +355,23 @@ export function useLive<T>(fetcher: () => Promise<T>): {
   // biome-ignore lint/correctness/useExhaustiveDependencies: `nonce` is a manual refetch trigger (reload()); `fetcher` is expected stable (useCallback).
   useEffect(() => {
     let cancelled = false;
-    fetcher()
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setData(null);
-      });
+    const run = () => {
+      fetcher()
+        .then((d) => {
+          if (!cancelled) setData(d);
+        })
+        .catch(() => {
+          if (!cancelled) setData(null);
+        });
+    };
+    run();
+    // Re-fetch the moment the user signs in / out so auth-gated widgets
+    // (BalanceCard / UsageChart / ApiKeys / ModelPicker) refresh immediately
+    // with the bearer token now attached (or fall back to mock once removed).
+    const unsub = subscribeAuth(run);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, [fetcher, nonce]);
   const reload = useCallback(() => setNonce((n) => n + 1), []);

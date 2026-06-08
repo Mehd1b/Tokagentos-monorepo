@@ -11,6 +11,7 @@
  * ../topup-flow + operator-local only (window.ethereum, no ethers).
  */
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../auth";
 import {
   friendlyError,
   type OnStatus,
@@ -45,6 +46,7 @@ export function SwapCard({
   chainId: number;
   onCredited: () => void;
 }) {
+  const { signedIn } = useAuth();
   const [token, setToken] = useState<SwapToken>("USDC");
   const [amount, setAmount] = useState("");
   const [slippageBps, setSlippageBps] = useState(50);
@@ -238,13 +240,15 @@ export function SwapCard({
         className="btn btn-gold btn-lg"
         style={{ marginTop: 14, width: "100%" }}
         onClick={run}
-        disabled={busy || !address}
+        disabled={busy || !address || !signedIn}
       >
         {!address
           ? "Connect a wallet to swap"
-          : busy
-            ? "Swapping…"
-            : "Swap → PTON"}
+          : !signedIn
+            ? "Sign in to the gateway"
+            : busy
+              ? "Swapping…"
+              : "Swap → PTON"}
       </button>
       <div
         className="mono"

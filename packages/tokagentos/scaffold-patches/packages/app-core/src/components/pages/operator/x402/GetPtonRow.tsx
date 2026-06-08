@@ -9,6 +9,7 @@
  * downstream balances. Self-contained: ../topup-flow + operator-local only.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../auth";
 import { formatAttoPtonAmount } from "../eip712";
 import {
   friendlyError,
@@ -28,6 +29,7 @@ export function GetPtonRow({
   chainId: number;
   onWrapped: () => void;
 }) {
+  const { signedIn } = useAuth();
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState<{ msg: string; kind: string } | null>(
@@ -132,13 +134,15 @@ export function GetPtonRow({
         className="btn btn-ghost btn-lg"
         style={{ marginTop: 12, width: "100%" }}
         onClick={run}
-        disabled={busy || !address}
+        disabled={busy || !address || !signedIn}
       >
         {!address
           ? "Connect a wallet to wrap"
-          : busy
-            ? "Wrapping…"
-            : "Get PTON (wrap TON)"}
+          : !signedIn
+            ? "Sign in to the gateway"
+            : busy
+              ? "Wrapping…"
+              : "Get PTON (wrap TON)"}
       </button>
       <div
         className="mono"

@@ -10,6 +10,7 @@
  * Self-contained: ../topup-flow + ../chain-config + operator-local only.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../auth";
 import { chainMeta, loadDashboardConfig } from "../chain-config";
 import { formatAttoPtonAmount } from "../eip712";
 import {
@@ -30,6 +31,7 @@ export function BridgeCard({
   chainId: number;
   onBridged: () => void;
 }) {
+  const { signedIn } = useAuth();
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState<{ msg: string; kind: string } | null>(
@@ -147,13 +149,15 @@ export function BridgeCard({
         className="btn btn-ghost btn-lg"
         style={{ marginTop: 12, width: "100%" }}
         onClick={run}
-        disabled={busy || !address}
+        disabled={busy || !address || !signedIn}
       >
         {!address
           ? "Connect a wallet to bridge"
-          : busy
-            ? "Bridging…"
-            : `Bridge from ${fromName}`}
+          : !signedIn
+            ? "Sign in to the gateway"
+            : busy
+              ? "Bridging…"
+              : `Bridge from ${fromName}`}
       </button>
       <div
         className="mono"

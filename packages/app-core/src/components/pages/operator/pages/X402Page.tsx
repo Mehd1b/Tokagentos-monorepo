@@ -9,6 +9,7 @@
  * under ../x402, driven only by live /v1/* data.
  */
 import { useEffect, useState } from "react";
+import { useAuth } from "../auth";
 import {
   type ChainMeta,
   chainMeta,
@@ -35,6 +36,7 @@ function initialChainId(): number {
 }
 
 export function X402Page() {
+  const { signedIn } = useAuth();
   const [address, setAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number>(initialChainId);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -109,6 +111,22 @@ export function X402Page() {
             address={address}
           />
         </div>
+
+        {/* Connected but not yet signed in → the gateway's /v1 routes are
+            bearer-auth gated, so nudge the user to sign in before funding. */}
+        {address && !signedIn && (
+          <p
+            className="mono"
+            style={{
+              margin: "0 0 18px",
+              fontSize: 12,
+              color: "var(--muted)",
+            }}
+          >
+            Wallet connected. Sign in to the gateway to load your balance and
+            fund credits.
+          </p>
+        )}
 
         {/* Balance + top-up */}
         <div className="x402-grid">

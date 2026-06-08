@@ -183,6 +183,17 @@ export async function loadDashboardConfig(): Promise<DashboardConfig> {
 }
 
 /**
+ * The gateway base URL for `/v1` calls. In client-mode this is the remote
+ * billing gateway (`CONFIG.PROXY_BASE`, e.g. the Railway URL); in server-mode
+ * it is "" (same-origin). Mirrors app.js `const PROXY = CONFIG.PROXY_BASE`,
+ * which prefixes every `api()` call — without it the operator talks to its own
+ * origin instead of where the account/vault/session actually live.
+ */
+export async function proxyBase(): Promise<string> {
+  return (await loadDashboardConfig()).PROXY_BASE;
+}
+
+/**
  * Resolve a chain's metadata by id from an already-loaded config, defaulting to
  * the first selectable chain. (app.js L72-74, `chainMeta`.)
  */

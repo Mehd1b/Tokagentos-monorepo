@@ -1,32 +1,38 @@
 /**
  * Operator console — live billing-gateway data (real-data seam).
  *
- * Self-contained same-origin calls to the billing gateway `/v1/*` routes,
- * mirroring the production billing views (CreditsView / UsageView / KeysView)
- * which `fetch("/v1/...", { credentials: "include" })`. Deliberately does NOT
- * touch TokagentClient / client.ts — the operator components import these
- * helpers/hooks directly and fall back to mock data when the gateway is
- * unavailable or the caller is unauthenticated.
+ * Calls the billing gateway `/v1/*` routes at PROXY_BASE (the REMOTE gateway in
+ * client-mode, "" same-origin in server-mode) with the SIWE bearer token —
+ * exactly as the billing dashboard app.js does. Self-contained: no TokagentClient
+ * / client.ts / ethers. The operator components import these helpers/hooks
+ * directly and render honest empty/error states when unauthenticated (no mock).
  *
  * Wired seams (have a real backend today):
  *   - ClaudeVault balance      → GET /v1/credits/me
  *   - Usage & spend            → GET /v1/usage/summary
  *   - API keys (list/mint/revoke) → /v1/keys
- * The A2A network graph + service directory have no backend yet and stay mock.
+ *   - Top-up (quote/settle)    → POST /v1/topup/{quote,settle}
  */
 import { useCallback, useEffect, useState } from "react";
 import { getToken, subscribeAuth } from "./auth";
+import { proxyBase } from "./chain-config";
 import type { Eip3009Authorization } from "./eip712";
 
 // ── low-level fetch ─────────────────────────────────────────────────────────
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  // The gateway's /v1 routes are auth-gated behind a SIWE bearer token. Attach
-  // it when the operator is signed in; keep credentials:"include" so the same
-  // call also works against cookie-auth gateways (the dashboard uses both).
+  // The gateway's /v1 routes live at PROXY_BASE — the REMOTE billing gateway in
+  // client-mode (e.g. Railway), NOT the operator's own origin — exactly as
+  // app.js's api() prefixes every call with CONFIG.PROXY_BASE. Same-origin
+  // server-mode leaves PROXY_BASE empty. Auth is the SIWE bearer; app.js sends
+  // no cookies, so only fall back to credentials:"include" in same-origin mode.
+  const base = await proxyBase();
   const headers = new Headers(init?.headers);
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(path, { credentials: "include", ...init, headers });
+  const reqInit: RequestInit = base
+    ? { ...init, headers }
+    : { credentials: "include", ...init, headers };
+  const res = await fetch(`${base}${path}`, reqInit);
   if (!res.ok) throw new Error(`${path} → ${res.status}`);
   return (await res.json()) as T;
 }
@@ -123,18 +129,20 @@ export async function settleTopup(
   // wallet and rate-limits per wallet (topup-routes returns 401 otherwise).
   // Attach the SIWE bearer alongside X-PAYMENT, exactly as app.js's api() does;
   // without it the deposit 401s AFTER the user has already signed.
+  const base = await proxyBase();
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-PAYMENT": xPayment,
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch("/v1/topup/settle", {
+  const reqInit: RequestInit = {
     method: "POST",
-    credentials: "include",
     headers,
     body: JSON.stringify({ chainId }),
-  });
+  };
+  if (!base) reqInit.credentials = "include";
+  const res = await fetch(`${base}/v1/topup/settle`, reqInit);
   const json = (await res.json().catch(() => ({}))) as {
     txHash?: string;
     error?: string;

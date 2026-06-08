@@ -16,6 +16,7 @@
  * SignatureRejectedError from the operator-local ../eip712 sibling).
  */
 import { useSyncExternalStore } from "react";
+import { proxyBase } from "./chain-config";
 import { SignatureRejectedError } from "./eip712";
 
 // ── session storage ─────────────────────────────────────────────────────────
@@ -260,14 +261,22 @@ export async function siweLogin(address: string): Promise<GatewaySession> {
   return loginRes;
 }
 
-/** Same-origin JSON POST with a clear error on HTTP failure. */
+/**
+ * JSON POST to the gateway with a clear error on HTTP failure. Prefixes
+ * PROXY_BASE so SIWE auth targets the SAME gateway the rest of the operator
+ * (and the billing dashboard) uses — signing in against the operator's own
+ * origin would mint a session the real gateway never honors. app.js routes
+ * /v1/auth/* through api() → PROXY too.
+ */
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const base = await proxyBase();
+  const reqInit: RequestInit = {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  };
+  if (!base) reqInit.credentials = "include";
+  const res = await fetch(`${base}${path}`, reqInit);
   if (!res.ok) {
     let detail = res.statusText;
     try {

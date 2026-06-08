@@ -43,10 +43,12 @@ import {
   encWtonSwapToTON,
   type UniV3Leg,
 } from "./abi-encode";
+import { getToken } from "./auth";
 import {
   chainMeta,
   type DashboardConfig,
   loadDashboardConfig,
+  proxyBase,
 } from "./chain-config";
 import {
   fetchTopupInfo,
@@ -352,12 +354,22 @@ async function fetchTopupQuotePton(
   // atto-PTON with micro-truncation, matching app.js topUp() L714.
   const valueAtto =
     BigInt(Math.round(ptonFloat * 1_000_000)) * (ATTO / 1_000_000n);
-  const res = await fetch("/v1/topup/quote", {
+  // Route through PROXY_BASE + bearer like client-billing — this quote leg is on
+  // the swap→credit money path; a same-origin call in client-mode quotes against
+  // the wrong backend and the (gateway-routed) settle then 402s after signing.
+  const base = await proxyBase();
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const reqInit: RequestInit = {
     method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ amountPton: valueAtto.toString(), chainId }),
-  });
+  };
+  if (!base) reqInit.credentials = "include";
+  const res = await fetch(`${base}/v1/topup/quote`, reqInit);
   if (!res.ok) throw new Error(`/v1/topup/quote → ${res.status}`);
   const q = (await res.json()) as {
     topupId: string;

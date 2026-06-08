@@ -9,6 +9,8 @@
  * components/pages/billing/eip712-utils.ts.
  */
 
+import { chainNowSec } from "./eth";
+
 export interface Eip712Domain {
   name: string;
   version: string;
@@ -190,7 +192,15 @@ export async function signTransferWithAuthorization(args: {
 }> {
   const eth = injectedWallet();
   if (!eth) throw new Error("No Web3 wallet detected.");
-  const validBefore = Math.floor(Date.now() / 1000) + 3600;
+  // Skew-tolerant validity window anchored to ON-CHAIN block time, ±1 year —
+  // ported verbatim from app.js topUp (L735-738, chainNowSec L649-660). The old
+  // wall-clock now+1h window risked the on-chain EIP-3009 transferWithAuthorization
+  // reverting (it enforces validAfter < block.timestamp < validBefore) under
+  // client-clock / chain-time skew or multi-step swap latency.
+  const ONE_YEAR_SEC = 31_536_000n;
+  const now = await chainNowSec();
+  const validAfter = (now - ONE_YEAR_SEC).toString();
+  const validBefore = (now + ONE_YEAR_SEC).toString();
   const typedData = {
     types: {
       EIP712Domain: EIP712_DOMAIN_TYPE,
@@ -202,7 +212,7 @@ export async function signTransferWithAuthorization(args: {
       from: args.address,
       to: args.to,
       value: args.valueAttoPton,
-      validAfter: 0,
+      validAfter,
       validBefore,
       nonce: args.nonceHex,
     },
@@ -229,8 +239,8 @@ export async function signTransferWithAuthorization(args: {
       from: args.address,
       to: args.to,
       value: args.valueAttoPton,
-      validAfter: "0",
-      validBefore: validBefore.toString(),
+      validAfter,
+      validBefore,
       nonce: args.nonceHex,
     },
   };

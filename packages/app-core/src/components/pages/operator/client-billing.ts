@@ -88,15 +88,23 @@ export interface TopupQuote {
   };
 }
 
-/** POST /v1/topup/quote — returns amounts + the EIP-712 domain inline. */
+/**
+ * POST /v1/topup/quote for a PTON amount. Top-up deposits PTON 1:1 — 1 PTON in →
+ * 1 PTON credited — so the amount is denominated in PTON; `amountUsd` in the
+ * response is only an informational preview. Sends `amountPton` in atto (1e18)
+ * with micro-PTON truncation, matching app.js topUp() (the server prefers
+ * amountPton and settlement equality-checks the signature value against it).
+ */
 export function fetchTopupQuote(
-  amountUsd: number,
+  amountPton: number,
   chainId: number,
 ): Promise<TopupQuote> {
+  const valueAtto =
+    BigInt(Math.round(amountPton * 1_000_000)) * (10n ** 18n / 1_000_000n);
   return getJson<TopupQuote>("/v1/topup/quote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ amountUsd, chainId }),
+    body: JSON.stringify({ amountPton: valueAtto.toString(), chainId }),
   });
 }
 

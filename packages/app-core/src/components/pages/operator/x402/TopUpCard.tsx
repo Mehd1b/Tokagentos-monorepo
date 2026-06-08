@@ -2,9 +2,10 @@
  * x402 · Top-up — INLINE native EIP-3009 deposit card (no modal/portal).
  *
  * The real top-up flow, ported from the former TopupFlow modal into a normal
- * .card in the page flow: amount(USD) + presets → debounced POST /v1/topup/quote
- * (stale quotes cancelled via a seq ref) → live "you receive ~N PTON" + expiry
- * countdown → a single "Deposit · gasless EIP-3009" button that runs the flow in
+ * .card in the page flow: amount(PTON) + presets → debounced POST /v1/topup/quote
+ * (stale quotes cancelled via a seq ref) → live "deposit N PTON (≈ $X)" + expiry
+ * countdown → a single "Deposit · gasless EIP-3009" button that runs the flow in.
+ * Top-up deposits PTON 1:1 (1 PTON in → 1 PTON credited); USD is only a preview.
  * place with an inline status line:
  *   connectWallet (if no address) → switch chain if needed →
  *   eth_signTypedData_v4 (EIP-3009 TransferWithAuthorization) → POST settle.
@@ -42,7 +43,7 @@ export function TopUpCard({
   chainId: number;
   onDeposited: () => void;
 }) {
-  const [amountUsd, setAmountUsd] = useState("25");
+  const [amountPton, setAmountPton] = useState("25");
   const [quote, setQuote] = useState<TopupQuote | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -69,8 +70,8 @@ export function TopUpCard({
       setError(null);
       return;
     }
-    const usd = Number.parseFloat(amountUsd);
-    if (!Number.isFinite(usd) || usd <= 0) {
+    const pton = Number.parseFloat(amountPton);
+    if (!Number.isFinite(pton) || pton <= 0) {
       setQuote(null);
       setPhase("idle");
       return;
@@ -79,7 +80,7 @@ export function TopUpCard({
     setPhase("quoting");
     setError(null);
     const t = setTimeout(() => {
-      fetchTopupQuote(usd, chainId)
+      fetchTopupQuote(pton, chainId)
         .then((q) => {
           if (seq === quoteSeq.current) {
             setQuote(q);
@@ -106,7 +107,7 @@ export function TopUpCard({
     // user signs in to the gateway. address is no longer read here (the guard is
     // signedIn now), so it is intentionally out of the deps.
     // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
-  }, [signedIn, amountUsd, chainId, requoteNonce]);
+  }, [signedIn, amountPton, chainId, requoteNonce]);
 
   // Quote expiry countdown.
   useEffect(() => {
@@ -232,17 +233,19 @@ export function TopUpCard({
         EIP-3009
       </div>
 
-      {/* Amount */}
+      {/* Amount — denominated in PTON (deposit is 1:1). */}
       <div className="amount-field" style={{ marginTop: 8 }}>
         <input
-          value={amountUsd}
-          onChange={(e) => setAmountUsd(e.target.value.replace(/[^0-9.]/g, ""))}
+          value={amountPton}
+          onChange={(e) =>
+            setAmountPton(e.target.value.replace(/[^0-9.]/g, ""))
+          }
           placeholder="0.00"
           inputMode="decimal"
           disabled={busy}
-          aria-label="Top-up amount in USD"
+          aria-label="Top-up amount in PTON"
         />
-        <span className="suffix">USD</span>
+        <span className="suffix">PTON</span>
       </div>
       <div className="amount-presets">
         {PRESETS.map((p) => (
@@ -250,10 +253,10 @@ export function TopUpCard({
             key={p}
             type="button"
             className="preset"
-            onClick={() => setAmountUsd(p)}
+            onClick={() => setAmountPton(p)}
             disabled={busy}
           >
-            ${p}
+            {p}
           </button>
         ))}
       </div>
@@ -268,8 +271,16 @@ export function TopUpCard({
         }}
       >
         <div className="swap-out">
-          <div className="k">you receive</div>
+          <div className="k">you deposit (1:1)</div>
           <div className="v">{phase === "quoting" ? "…" : ptonOut} PTON</div>
+          {quote && Number.isFinite(quote.amountUsd) && quote.amountUsd > 0 && (
+            <div
+              className="mono"
+              style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}
+            >
+              ≈ ${quote.amountUsd.toFixed(2)}
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "right" }}>
           <div
@@ -366,7 +377,7 @@ export function TopUpCard({
               ? "Signing & settling…"
               : expired
                 ? "Refresh quote"
-                : `Deposit $${amountUsd || "0"} · gasless EIP-3009`}
+                : `Deposit ${amountPton || "0"} PTON · gasless EIP-3009`}
       </button>
       <div
         className="mono"

@@ -57,6 +57,14 @@ export function TopUpCard({
   const quoteSeq = useRef(0);
   useEffect(() => {
     if (phase === "depositing" || phase === "done") return;
+    // The quote endpoint is auth-gated — don't fire it (and surface a raw 401)
+    // until a wallet is connected. Before connect, sit in the idle/connect state.
+    if (!address) {
+      setQuote(null);
+      setPhase("idle");
+      setError(null);
+      return;
+    }
     const usd = Number.parseFloat(amountUsd);
     if (!Number.isFinite(usd) || usd <= 0) {
       setQuote(null);
@@ -78,7 +86,12 @@ export function TopUpCard({
           if (seq === quoteSeq.current) {
             setQuote(null);
             setPhase("error");
-            setError(e instanceof Error ? e.message : "Quote failed.");
+            const msg = e instanceof Error ? e.message : "";
+            setError(
+              /401|unauth/i.test(msg)
+                ? "Sign in to the gateway to get a quote."
+                : "Couldn't fetch a quote — try again.",
+            );
           }
         });
     }, 400);
@@ -86,7 +99,7 @@ export function TopUpCard({
     // phase intentionally omitted to avoid re-quoting on every transition;
     // requoteNonce lets the expired-quote "Refresh" button force a re-quote.
     // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
-  }, [amountUsd, chainId, requoteNonce]);
+  }, [address, amountUsd, chainId, requoteNonce]);
 
   // Quote expiry countdown.
   useEffect(() => {

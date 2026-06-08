@@ -163,9 +163,14 @@ export function fetchTopupInfo(chainId: number): Promise<TopupInfo> {
 
 // ── price (TON/USD) ───────────────────────────────────────────────────────────
 export interface PriceResponse {
-  /** TON price in USD (FLAT field — NOT snapshot.tonUsd). */
-  tonUsd: number;
+  /**
+   * TON price in USD (FLAT field — NOT snapshot.tonUsd). Absent when the oracle
+   * has no cached price ({ available: false }), so callers must null-guard.
+   */
+  tonUsd?: number;
+  available?: boolean;
   source?: string;
+  fetchedAt?: number | null;
   ageMs?: number;
 }
 

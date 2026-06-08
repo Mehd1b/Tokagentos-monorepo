@@ -179,7 +179,12 @@ export interface ActiveModelResponse {
   /** Gateway-wide active model id, or null when none is pinned. */
   active: string | null;
   /** Catalogue of selectable models, when the gateway reports it. */
-  models?: string[];
+  models?: Array<{
+    id: string;
+    label?: string;
+    inputPerM?: number;
+    outputPerM?: number;
+  }>;
 }
 
 /** GET /v1/model — the gateway-wide active model + (optionally) the catalogue. */

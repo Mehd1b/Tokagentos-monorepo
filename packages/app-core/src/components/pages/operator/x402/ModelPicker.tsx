@@ -34,8 +34,18 @@ export function ModelPicker() {
   // Real-data only: hide the section entirely when the gateway returns nothing.
   if (!live || !data) return null;
 
-  const models = data.models ?? (data.active ? [data.active] : []);
-  if (models.length === 0) return null;
+  // /v1/model.models is an array of { id, label, … } objects; fall back to the
+  // active id when the catalogue is absent. Normalise to { id, label }.
+  const catalog: { id: string; label: string }[] = (data.models ?? []).map(
+    (m) => ({ id: m.id, label: m.label ?? m.id }),
+  );
+  const list =
+    catalog.length > 0
+      ? catalog
+      : data.active
+        ? [{ id: data.active, label: data.active }]
+        : [];
+  if (list.length === 0) return null;
 
   return (
     <>
@@ -57,14 +67,14 @@ export function ModelPicker() {
           aria-label="Active model"
           style={{ display: "flex", gap: 7, flexWrap: "wrap" }}
         >
-          {models.map((m) => {
-            const active = data.active === m;
+          {list.map((m) => {
+            const active = data.active === m.id;
             return (
               <button
-                key={m}
+                key={m.id}
                 type="button"
                 className={`token-btn ${active ? "is-active" : ""}`}
-                onClick={() => onPick(m)}
+                onClick={() => onPick(m.id)}
                 disabled={saving != null}
                 aria-pressed={active}
                 style={{
@@ -73,7 +83,9 @@ export function ModelPicker() {
                   minWidth: 0,
                 }}
               >
-                <span className="token-sym">{saving === m ? "…" : m}</span>
+                <span className="token-sym">
+                  {saving === m.id ? "…" : m.label}
+                </span>
               </button>
             );
           })}

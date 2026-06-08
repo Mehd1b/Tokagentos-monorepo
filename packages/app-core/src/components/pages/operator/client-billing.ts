@@ -136,6 +136,31 @@ export async function settleTopup(
   return { ok: false, status: res.status, txHash: json.txHash, error };
 }
 
+// ── deposit targets (vault + PTON asset, per chain) ──────────────────────────
+export interface TopupInfo {
+  chainId: number;
+  /** ClaudeVault address (the EIP-3009 `to`). */
+  vault: `0x${string}`;
+  /** PTON token address (the deposit asset / `PTON.deposit` target). */
+  asset: `0x${string}`;
+  domain?: {
+    name: string;
+    version: string;
+    chainId: number;
+    verifyingContract: `0x${string}`;
+  };
+}
+
+/**
+ * GET /v1/topup/info?chainId — resolve THIS chain's vault + PTON asset. The
+ * gateway exposes `vault`/`asset` aliases (older gateways ignore the query and
+ * return their single configured chain). Mirrors app.js resolveDepositTargets
+ * (L622-636).
+ */
+export function fetchTopupInfo(chainId: number): Promise<TopupInfo> {
+  return getJson<TopupInfo>(`/v1/topup/info?chainId=${chainId}`);
+}
+
 // ── price (TON/USD) ───────────────────────────────────────────────────────────
 export interface PriceResponse {
   /** TON price in USD (FLAT field — NOT snapshot.tonUsd). */
@@ -154,7 +179,12 @@ export interface ActiveModelResponse {
   /** Gateway-wide active model id, or null when none is pinned. */
   active: string | null;
   /** Catalogue of selectable models, when the gateway reports it. */
-  models?: string[];
+  models?: Array<{
+    id: string;
+    label?: string;
+    inputPerM?: number;
+    outputPerM?: number;
+  }>;
 }
 
 /** GET /v1/model — the gateway-wide active model + (optionally) the catalogue. */

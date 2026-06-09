@@ -1,39 +1,46 @@
 /**
  * Operator chat page — two-pane layout (thread rail + message stream + composer).
- * Ported from handoff_app/prototype/components/Pages.jsx (ChatPage).
  *
- * Live: lists real dashboard conversations + their messages via the
- * self-contained operator gateway (`fetchConversations` / `fetchMessages`),
- * sends through the non-streaming `sendMessage` (the POST returns the agent's
- * full reply synchronously), and creates threads via `createConversation` —
- * same-origin/session auth, identical to the production ChatView. The composer
- * footer's model chip uses a sensible default and the x402 chip comes from the
- * operator's live ClaudeVault balance (GET /v1/credits/me). Falls back to
- * {@link CHAT_THREADS} / {@link CHAT_ACTION_KV} (the "⟩ example values" view)
- * when the gateway is unavailable or the caller is unauthenticated. Loading
- * keeps the mock so the page never blanks; the action card maps to the real
- * `actionName` + `actionCallbackHistory` lines when present.
+ * Real data only, streaming like the global chat. Lists real dashboard
+ * conversations + their messages via the self-contained operator gateway
+ * (`fetchConversations` / `fetchMessages`), creates threads via
+ * `createConversation`, and SENDS through `streamMessage` — a same-origin SSE
+ * POST to the agent server that renders the assistant reply token-by-token
+ * (mirrors app-core's `streamChatEndpoint` + `normalizeAssistantText`). Auth is
+ * same-origin/session, identical to the production ChatView.
+ *
+ * No mock fallback: when not signed in / unauthenticated, the page shows an
+ * honest "sign in to chat" empty state instead of a fake demo stream. The
+ * composer footer's model chip uses the live gateway-wide active model
+ * (`getActiveModel`), and the x402 chip uses the operator's live ClaudeVault
+ * balance (`fetchCredits`), showing "—" when unavailable. The action card maps
+ * to the real `actionName` + `actionCallbackHistory` lines when present.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KeyMark } from "../brand/KeyMark";
-import { fetchCredits, formatAttoPtonString, useLive } from "../client-billing";
+import {
+  fetchCredits,
+  formatAttoPtonString,
+  getActiveModel,
+  useLive,
+} from "../client-billing";
 import {
   createConversation,
   fetchConversations,
   fetchMessages,
+  type GwConversation,
   type GwMessage,
-  sendMessage,
+  streamMessage,
 } from "../client-gateway";
-import { CHAT_ACTION_KV, CHAT_THREADS, type ChatThread } from "../mock";
 
-/** Default model chip label (self-contained — no live /v1/model lookup). */
-const DEFAULT_MODEL = "claude-sonnet-4-5";
+/** Neutral model-chip label when the gateway reports no active model. */
+const NEUTRAL_MODEL = "default model";
 
-/** Rendered message = gateway message + client-only optimistic flag. */
-type ChatMessage = GwMessage & { interrupted?: boolean };
+/** Rendered message = gateway message + client-only flags. */
+type ChatMessage = GwMessage & { interrupted?: boolean; streaming?: boolean };
 
-/** Live thread-rail row: mock {@link ChatThread} shape + the selection key. */
-type ThreadRow = ChatThread & { id: string };
+/** Live thread-rail row. */
+type ThreadRow = { id: string; name: string; time: string };
 
 /** Format an ISO timestamp as a short relative string ("2m ago", "yesterday"). */
 function shortRelative(iso: string | null | undefined): string {
@@ -56,27 +63,23 @@ function shortRelative(iso: string | null | undefined): string {
   });
 }
 
-export function ChatPage({
-  threads = CHAT_THREADS,
-  actionKv = CHAT_ACTION_KV,
-}: {
-  threads?: ChatThread[];
-  actionKv?: { k: string; v: string }[];
-} = {}) {
-  // ── Thread rail (live conversations, mock fallback) ────────────────────────
+function conversationToRow(c: GwConversation): ThreadRow {
+  return {
+    id: c.id,
+    name: c.title ?? "Conversation",
+    time: shortRelative(
+      typeof c.updatedAt === "number"
+        ? new Date(c.updatedAt).toISOString()
+        : c.updatedAt,
+    ),
+  };
+}
+
+export function ChatPage() {
+  // ── Thread rail (live conversations only) ──────────────────────────────────
   const threadsFetcher = useCallback(
     () =>
-      fetchConversations().then((r) =>
-        r.conversations.map<ThreadRow>((c) => ({
-          id: c.id,
-          name: c.title ?? "Conversation",
-          time: shortRelative(
-            typeof c.updatedAt === "number"
-              ? new Date(c.updatedAt).toISOString()
-              : c.updatedAt,
-          ),
-        })),
-      ),
+      fetchConversations().then((r) => r.conversations.map(conversationToRow)),
     [],
   );
   const {
@@ -84,9 +87,7 @@ export function ChatPage({
     live: threadsLive,
     reload,
   } = useLive(threadsFetcher);
-  const shownThreads: ThreadRow[] = liveThreads
-    ? liveThreads
-    : threads.map((t, i) => ({ ...t, id: `mock-${i}` }));
+  const shownThreads: ThreadRow[] = liveThreads ?? [];
 
   // Selected thread id drives the `active` highlight + the message fetch.
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -98,7 +99,6 @@ export function ChatPage({
   // ── Message stream for the selected thread ─────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   useEffect(() => {
-    // Only fetch real messages for real (non-mock) conversations.
     if (!threadsLive || !effectiveSelectedId) {
       setMessages(null);
       return;
@@ -118,32 +118,49 @@ export function ChatPage({
 
   const messagesLive = threadsLive && messages !== null;
 
-  // ── Composer send (non-streaming, optimistic) ──────────────────────────────
+  // ── Composer send (streaming, optimistic) ──────────────────────────────────
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const onSend = useCallback(async () => {
     const text = draft.trim();
-    if (!text || sending || !messagesLive || !effectiveSelectedId) return;
-    setSending(true);
+    if (!text || streaming || !messagesLive || !effectiveSelectedId) return;
+    setStreaming(true);
     setDraft("");
     const userId = `local-user-${Date.now()}`;
     const replyId = `local-reply-${Date.now()}`;
-    // Append the user bubble + an empty assistant placeholder immediately.
+    // Append the user bubble + an empty (streaming) assistant placeholder.
     setMessages((prev) => [
       ...(prev ?? []),
       { id: userId, role: "user", text },
-      { id: replyId, role: "assistant", text: "" },
+      { id: replyId, role: "assistant", text: "", streaming: true },
     ]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      // Non-streaming send — the POST returns the agent's full reply.
-      const reply = await sendMessage(effectiveSelectedId, text);
+      const reply = await streamMessage(
+        effectiveSelectedId,
+        text,
+        // Live token render — push the running fullText into the placeholder.
+        (fullText) => {
+          setMessages((prev) =>
+            (prev ?? []).map((m) =>
+              m.id === replyId ? { ...m, text: fullText } : m,
+            ),
+          );
+        },
+        controller.signal,
+      );
+      // Settle the placeholder with the final NORMALIZED text.
       setMessages((prev) =>
         (prev ?? []).map((m) =>
           m.id === replyId
             ? {
                 ...m,
-                text: reply.text || reply.noResponseReason || "(no response)",
+                text: reply.text,
+                streaming: false,
                 interrupted: !reply.text,
               }
             : m,
@@ -151,18 +168,24 @@ export function ChatPage({
       );
       reload();
     } catch {
-      // Keep the optimistic bubbles; mark the empty reply as interrupted.
+      // Keep the optimistic bubbles; mark the (still-empty) reply interrupted.
       setMessages((prev) =>
         (prev ?? []).map((m) =>
-          m.id === replyId && !m.text
-            ? { ...m, text: "(no response)", interrupted: true }
+          m.id === replyId
+            ? {
+                ...m,
+                text: m.text || "(no response)",
+                streaming: false,
+                interrupted: !m.text,
+              }
             : m,
         ),
       );
     } finally {
-      setSending(false);
+      abortRef.current = null;
+      setStreaming(false);
     }
-  }, [draft, sending, messagesLive, effectiveSelectedId, reload]);
+  }, [draft, streaming, messagesLive, effectiveSelectedId, reload]);
 
   const onNewConversation = useCallback(async () => {
     try {
@@ -170,16 +193,20 @@ export function ChatPage({
       setSelectedId(conversation.id);
       reload();
     } catch {
-      /* unauthenticated / gateway unavailable — keep the mock view */
+      /* unauthenticated / gateway unavailable — nothing to do */
     }
   }, [reload]);
 
-  // ── Composer footer chips (model + x402 PTON balance) ──────────────────────
+  // ── Composer footer chips (live active model + x402 PTON balance) ──────────
+  const modelFetcher = useCallback(() => getActiveModel(), []);
+  const { data: activeModel } = useLive(modelFetcher);
+  const modelLabel = activeModel?.active || NEUTRAL_MODEL;
+
   const creditsFetcher = useCallback(() => fetchCredits(), []);
   const { data: credits } = useLive(creditsFetcher);
   const ptonLabel = credits
     ? `${formatAttoPtonString(credits.balance)} PTON`
-    : "1,284 PTON";
+    : "—";
 
   // ── Action card: surface the real action name + callback lines ─────────────
   const actionMessage = useMemo(
@@ -193,6 +220,9 @@ export function ChatPage({
         : undefined,
     [messagesLive, messages],
   );
+  void actionMessage; // action lines render inline per-message below.
+
+  const hasConversation = threadsLive && effectiveSelectedId !== null;
 
   return (
     <div className="page" style={{ overflow: "hidden" }}>
@@ -202,22 +232,19 @@ export function ChatPage({
             className="chat-new"
             type="button"
             onClick={onNewConversation}
+            disabled={!threadsLive}
           >
             ＋ New conversation
           </button>
           {shownThreads.map((t) => {
-            const isActive = threadsLive
-              ? t.id === effectiveSelectedId
-              : (t.active ?? false);
+            const isActive = t.id === effectiveSelectedId;
             return (
               <div
                 key={t.id}
                 className={`chat-thread ${isActive ? "is-active" : ""}`}
-                onClick={() => {
-                  if (threadsLive) setSelectedId(t.id);
-                }}
+                onClick={() => setSelectedId(t.id)}
                 onKeyDown={(e) => {
-                  if (threadsLive && (e.key === "Enter" || e.key === " ")) {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     setSelectedId(t.id);
                   }
@@ -235,9 +262,22 @@ export function ChatPage({
         <div className="chat-main">
           <div className="chat-stream">
             <div className="chat-stream-inner">
-              {threadsLive && shownThreads.length === 0 ? (
-                // Authenticated but no conversations yet — honest empty state,
-                // NOT the mock stream (no "live" chip sitting over fake messages).
+              {!threadsLive ? (
+                // Not signed in / unauthenticated — honest empty state.
+                <div
+                  className="msg-block"
+                  style={{
+                    textAlign: "center",
+                    color: "var(--muted)",
+                    padding: "48px 0",
+                  }}
+                >
+                  <div className="msg-text">
+                    Sign in to the gateway to chat.
+                  </div>
+                </div>
+              ) : shownThreads.length === 0 ? (
+                // Authenticated but no conversations yet.
                 <div
                   className="msg-block"
                   style={{
@@ -249,101 +289,23 @@ export function ChatPage({
                   <div className="msg-text">
                     No conversations yet — start one with{" "}
                     <strong style={{ color: "var(--text-strong)" }}>
-                      + New conversation
+                      ＋ New conversation
                     </strong>
                     .
                   </div>
                 </div>
               ) : !messagesLive ? (
-                // Mock / offline fallback — the original prototype stream.
-                <>
-                  <div className="msg-block">
-                    <div className="msg-role">
-                      <span className="av">🧑</span> you
-                    </div>
-                    <div className="msg-text user">
-                      whats my aave health on polygon? top up usdc if it drops
-                      below 1.6
-                    </div>
-                  </div>
-
-                  <div className="msg-block">
-                    <div className="msg-role agent">
-                      <span className="av">
-                        <KeyMark size={14} />
-                      </span>{" "}
-                      treasurer · vault mode
-                    </div>
-                    <div className="msg-text">
-                      Your Aave position on Polygon is healthy —{" "}
-                      <strong style={{ color: "var(--text-strong)" }}>
-                        health factor 1.84
-                      </strong>
-                      . You've supplied $284K USDC against $112K borrowed WETH.
-                      I've set a watch: if HF drops below 1.6 I'll draft a vault
-                      transaction to supply more USDC and surface it for your
-                      approval.
-                    </div>
-
-                    <div className="action-card">
-                      <div className="action-head">
-                        <div className="action-glyph">🛡️</div>
-                        <div style={{ flex: 1 }}>
-                          <div className="action-name">
-                            aave.read · getUserAccountData
-                          </div>
-                          <div className="action-sub">
-                            plugin-tokagent-yield · polygon
-                          </div>
-                        </div>
-                        <span className="chip ok">read · free</span>
-                      </div>
-                      <div className="action-body">
-                        {actionKv.map((kv) => (
-                          <div key={kv.k} className="action-kv">
-                            <div className="k">{kv.k}</div>
-                            <div className="v">{kv.v}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="action-foot">
-                        <span
-                          className="mono"
-                          style={{ fontSize: 10, color: "var(--muted)" }}
-                        >
-                          ⟩ watch armed · trigger HF &lt; 1.6
-                        </span>
-                        <span className="chip mute">subscribed</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="msg-block">
-                    <div className="msg-role agent">
-                      <span className="av">
-                        <KeyMark size={14} />
-                      </span>{" "}
-                      treasurer
-                    </div>
-                    <div className="msg-text">
-                      I also called{" "}
-                      <span
-                        className="mono"
-                        style={{ color: "var(--gold-hi)", fontSize: 13 }}
-                      >
-                        px-oracle
-                      </span>{" "}
-                      to confirm the WETH price before scoring risk — settled{" "}
-                      <span
-                        className="mono"
-                        style={{ color: "var(--gold-hi)", fontSize: 13 }}
-                      >
-                        0.004 PTON
-                      </span>{" "}
-                      via x402.
-                    </div>
-                  </div>
-                </>
+                // Selected conversation, messages still loading.
+                <div
+                  className="msg-block"
+                  style={{
+                    textAlign: "center",
+                    color: "var(--muted)",
+                    padding: "48px 0",
+                  }}
+                >
+                  <div className="msg-text">Loading…</div>
+                </div>
               ) : (messages ?? []).length === 0 ? (
                 <div className="msg-block">
                   <div className="msg-role agent">
@@ -353,8 +315,7 @@ export function ChatPage({
                     treasurer · vault mode
                   </div>
                   <div className="msg-text" style={{ color: "var(--muted)" }}>
-                    No messages yet. Send the first message to start this
-                    conversation.
+                    Send the first message to start this conversation.
                   </div>
                 </div>
               ) : (
@@ -364,6 +325,13 @@ export function ChatPage({
                     m.actionName ||
                     (m.actionCallbackHistory &&
                       m.actionCallbackHistory.length > 0);
+                  const body = m.text
+                    ? m.text
+                    : m.streaming
+                      ? "…"
+                      : m.interrupted
+                        ? "(no response)"
+                        : "…";
                   return (
                     <div className="msg-block" key={m.id}>
                       <div className={`msg-role ${isUser ? "" : "agent"}`}>
@@ -373,7 +341,7 @@ export function ChatPage({
                         {isUser ? "you" : "treasurer · vault mode"}
                       </div>
                       <div className={`msg-text ${isUser ? "user" : ""}`}>
-                        {m.text || (m.interrupted ? "(no response)" : "…")}
+                        {body}
                       </div>
 
                       {!isUser && hasAction && (
@@ -416,7 +384,7 @@ export function ChatPage({
               <input
                 placeholder="Message treasurer…  (⌘↵ to send)"
                 value={draft}
-                disabled={sending}
+                disabled={streaming || !hasConversation}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -428,7 +396,7 @@ export function ChatPage({
               <button
                 className="composer-send"
                 type="button"
-                disabled={sending || !messagesLive}
+                disabled={streaming || !messagesLive || !hasConversation}
                 onClick={() => void onSend()}
               >
                 <svg
@@ -446,14 +414,14 @@ export function ChatPage({
             </div>
             <div className="composer-hint">
               <span>vault mode · actions need approval</span>
-              <span>{DEFAULT_MODEL}</span>
+              <span>{modelLabel}</span>
               <span>x402 · {ptonLabel}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* live / example-values indicator (operator chip pattern) */}
+      {/* live / status indicator (operator chip pattern) */}
       <div
         style={{
           position: "absolute",
@@ -467,7 +435,7 @@ export function ChatPage({
         {threadsLive ? (
           <span className="chip ok">live · chat</span>
         ) : (
-          <span className="chip mute">⟩ example values</span>
+          <span className="chip mute">signed out</span>
         )}
       </div>
     </div>

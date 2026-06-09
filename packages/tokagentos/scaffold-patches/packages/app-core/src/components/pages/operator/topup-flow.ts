@@ -320,6 +320,16 @@ async function runX402Credit(
   // amount-PTON path credits exactly what we just wrapped.
   const quote = await fetchTopupQuotePton(ptonFloat, chainId);
   const addr = await activeAccount();
+  // Pre-check: the gasless deposit pulls quote.amountPton from the wallet via
+  // PTON.transferWithAuthorization. If the wallet holds less (e.g. the wrap
+  // under-delivered), surface it clearly instead of a blind depositX402 revert.
+  const ptonBal = await readBalance(quote.ptonAddress, addr);
+  const need = BigInt(quote.amountPton);
+  if (ptonBal < need) {
+    throw new Error(
+      `Insufficient PTON to credit: have ${formatUnits(ptonBal, 18, 6)}, need ${formatUnits(need, 18, 6)}. The wrap may not have completed — check your wallet PTON balance.`,
+    );
+  }
   const { signature, authorization } = await signTransferWithAuthorization({
     address: addr as `0x${string}`,
     domain: quote.domain as Eip712Domain,

@@ -67,7 +67,12 @@ export function decomposeSignature(hex: string): {
   }
   const r = hex.slice(0, 66) as `0x${string}`;
   const s = `0x${hex.slice(66, 130)}` as `0x${string}`;
-  const v = Number.parseInt(hex.slice(130, 132), 16);
+  // Normalize the recovery id to 27/28. viem's off-chain verify accepts 0/1,
+  // but the on-chain ecrecover in PTON.transferWithAuthorization needs 27/28 —
+  // a raw 0/1 passes settle's signature check yet reverts depositX402. (app.js
+  // signTopupAuth L707: `if (v < 27) v += 27`.)
+  let v = Number.parseInt(hex.slice(130, 132), 16);
+  if (v < 27) v += 27;
   return { v, r, s };
 }
 

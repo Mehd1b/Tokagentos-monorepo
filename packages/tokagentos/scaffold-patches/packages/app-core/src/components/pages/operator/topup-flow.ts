@@ -768,10 +768,18 @@ export async function runSwapToPton(
     }
   }
 
-  // Convert ray→wei; sub-1e9-ray dust stays in wallet as WTON. (app.js L1170-1175)
-  const tonToWrap = wtonReceived / WTON_RAY_PER_WEI;
+  // Convert ray→wei, then TRUNCATE to micro-TON (6 dp). Two reasons:
+  //  1. The full 18-decimal value (e.g. 1670.0689854122718) decodes in MetaMask
+  //     to a >15-significant-digit JS number, and its fiat preview then throws
+  //     `BigNumber.times: more than 15 significant digits` on the approve/deposit.
+  //  2. The vault credit is already micro-truncated (microPton below), so wrapping
+  //     the same micro amount keeps wrap == credit exactly (no uncredited PTON).
+  // Sub-micro-TON dust stays in the wallet as WTON. (app.js L1170-1175 wraps the
+  // full amount; we truncate to keep every downstream amount MetaMask-safe.)
+  const MICRO = ATTO / 1_000_000n; // 1e12 wei per micro-TON
+  const tonToWrap = (wtonReceived / WTON_RAY_PER_WEI / MICRO) * MICRO;
   if (tonToWrap === 0n) {
-    throw new Error("Swap produced sub-wei TON dust — increase amount.");
+    throw new Error("Swap produced sub-micro TON dust — increase amount.");
   }
   const wtonToBurn = tonToWrap * WTON_RAY_PER_WEI;
 

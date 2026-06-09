@@ -851,15 +851,30 @@ export async function readSwapTokenBalance(
   try {
     const user = await activeAccount();
     const cfg = SWAP_ADDRESSES[token];
-    if (token === "ETH") {
-      const wei = await ethGetBalance(user); // wallet native balance. (app.js L1312)
-      return Number(wei) / 1e18;
-    }
-    const raw = await readBalance(cfg.address as string, user);
-    return Number(raw) / 10 ** cfg.decimals;
+    const raw =
+      token === "ETH"
+        ? await ethGetBalance(user) // wallet native balance. (app.js L1312)
+        : await readBalance(cfg.address as string, user);
+    return boundBalancePrecision(Number(raw) / 10 ** cfg.decimals);
   } catch {
     return null;
   }
+}
+
+/**
+ * Bound a display/Max balance to ≤12 significant digits, truncating toward zero.
+ * Number(bigint)/10**decimals on an 18-decimal balance yields full float noise
+ * (e.g. 1670.0689854122718, 17 sig digits); feeding that into an amount field →
+ * a tx makes MetaMask's fiat preview throw `BigNumber.times: more than 15
+ * significant digits`. Truncating (never rounding up) also guarantees a "Max"
+ * never exceeds the real balance.
+ */
+function boundBalancePrecision(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  const intDigits = Math.floor(Math.log10(v)) + 1;
+  const dp = Math.max(0, Math.min(6, 12 - intDigits));
+  const f = 10 ** dp;
+  return Math.floor(v * f) / f;
 }
 
 /** Token decimals lookup for the Swap card's parse/preview. */

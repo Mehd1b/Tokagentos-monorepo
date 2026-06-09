@@ -198,6 +198,23 @@ export function friendlyError(msg: unknown, chainId?: number): string {
   if (/User rejected|reject|denied|cancel|ACTION_REJECTED|4001/i.test(m)) {
     return "Request rejected — no transaction was sent.";
   }
+  // viem renders a contract revert across multiple lines and puts the 4-byte
+  // selector on a line BELOW "…with the following signature:", so the first line
+  // alone hides the cause. Pull a standalone 4-byte selector (not a 20-byte
+  // address / 32-byte hash) from anywhere in the message and decode it.
+  const sel = /0x[0-9a-fA-F]{8}(?![0-9a-fA-F])/.exec(m)?.[0]?.toLowerCase();
+  // Known on-chain custom errors (selector → human message).
+  const KNOWN_REVERTS: Record<string, string> = {
+    "0xc7502d93":
+      "This top-up was already processed on-chain (TopupAlreadyUsed). Re-quote and try again.",
+  };
+  if (sel && KNOWN_REVERTS[sel]) return KNOWN_REVERTS[sel];
+  // String-reason reverts (`reverted with the following reason: <text>`).
+  const reason = /reason:?\s*\n?\s*["']?([^"'\n]{3,140})/i.exec(m)?.[1]?.trim();
+  if (reason) return `Deposit reverted: ${reason}`;
+  if (/depositX402|reverted/i.test(m)) {
+    return `On-chain deposit reverted${sel ? ` (${sel})` : ""}. Copy this code so it can be decoded.`;
+  }
   const first = m.split("\n")[0].trim();
   return first.length > 160 ? `${first.slice(0, 157)}…` : first;
 }

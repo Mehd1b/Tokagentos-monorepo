@@ -59,8 +59,22 @@ export function BalanceCard({
   const data = credits.data;
   const tonUsd = price.data?.tonUsd ?? null;
 
-  const balanceStr = data ? formatAttoPtonString(data.balance) : null;
-  const usd = data && tonUsd != null ? usdEstimate(data.balance, tonUsd) : null;
+  // The gateway's `balance` is the SPENDABLE amount — already net of reserved +
+  // accrued (credits-routes: `balance = onChain - (reserved + accrued)`). The
+  // hero "ClaudeVault balance" must show the TOTAL on-chain credit (what you
+  // deposited = balance + reserved + accrued), else a deposit looks short by the
+  // reserved/accrued amount. Spendable is shown as its own stat below.
+  const totalAtto = data
+    ? (
+        BigInt(data.balance) +
+        BigInt(data.reserved) +
+        BigInt(data.accrued)
+      ).toString()
+    : null;
+  const balanceStr = totalAtto ? formatAttoPtonString(totalAtto) : null;
+  const spendableStr = data ? formatAttoPtonString(data.balance) : null;
+  const usd =
+    totalAtto && tonUsd != null ? usdEstimate(totalAtto, tonUsd) : null;
   const vault = data?.backing ?? null;
 
   return (
@@ -94,7 +108,7 @@ export function BalanceCard({
           : "Sign in to the gateway to view your balance"}
       </div>
 
-      {/* reserved + accrued — live only */}
+      {/* spendable + reserved + accrued — live only (these sum to the hero) */}
       {data && (
         <div
           style={{
@@ -104,6 +118,15 @@ export function BalanceCard({
             marginTop: 14,
           }}
         >
+          <span
+            className="chip ok"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            spendable
+            <span className="mono" style={{ color: "var(--ok-bright)" }}>
+              {spendableStr} PTON
+            </span>
+          </span>
           <span
             className="chip mute"
             style={{ display: "inline-flex", alignItems: "center", gap: 6 }}

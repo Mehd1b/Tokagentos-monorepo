@@ -151,8 +151,17 @@ export function Sidebar({
     return () => clearInterval(iv);
   }, [reload]);
 
+  // Total ClaudeVault credit = spendable balance + reserved + accrued (the
+  // gateway's `balance` is already net of the latter two), so the sidebar matches
+  // what was deposited rather than under-reporting by the reserved/accrued held.
   const ptonBalance = credits.data
-    ? formatAttoPtonString(credits.data.balance)
+    ? formatAttoPtonString(
+        (
+          BigInt(credits.data.balance) +
+          BigInt(credits.data.reserved) +
+          BigInt(credits.data.accrued)
+        ).toString(),
+      )
     : null;
 
   const renderNav = (entry: NavEntry) => {

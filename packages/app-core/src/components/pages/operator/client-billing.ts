@@ -337,6 +337,58 @@ export async function revokeApiKey(id: string): Promise<void> {
   });
 }
 
+/** DELETE /v1/keys/:id?hard=true — permanently remove a (revoked) key row. */
+export async function deleteApiKey(id: string): Promise<void> {
+  await getJson<unknown>(`/v1/keys/${encodeURIComponent(id)}?hard=true`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Same-origin POST to the LOCAL agent — NOT PROXY_BASE. The .env write + restart
+ * act on the agent's own filesystem/process, which the remote billing gateway
+ * cannot touch, so (exactly like app.js) these bypass the gateway prefix. Carries
+ * the bearer + cookie so whichever auth the local agent uses is satisfied.
+ */
+async function localPost(path: string, body?: unknown): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+/** Syntactic check for an `sk-ai-…` key (mirrors app.js install validation). */
+export function isValidChatKey(key: string): boolean {
+  return /^sk-ai-[A-Za-z0-9_-]{16,}$/.test(key.trim());
+}
+
+/** POST /v1/keys/install — write BILLING_CHAT_KEY=<key> to the LOCAL agent .env. */
+export async function installChatKey(key: string): Promise<void> {
+  const res = await localPost("/v1/keys/install", { key: key.trim() });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(
+      j.error || `Couldn't write the key to .env (${res.status}).`,
+    );
+  }
+}
+
+/** POST /api/restart — restart the LOCAL agent so the new key takes effect. */
+export async function restartAgent(): Promise<void> {
+  const res = await localPost("/api/restart");
+  if (!res.ok) {
+    throw new Error(
+      `Key saved, but the agent didn't restart (${res.status}). Restart it manually.`,
+    );
+  }
+}
+
 /** Map a real key row to the operator `ApiKeyEntry` display shape. */
 export function apiKeyRowToEntry(row: ApiKeyRowResponse): {
   id: string;

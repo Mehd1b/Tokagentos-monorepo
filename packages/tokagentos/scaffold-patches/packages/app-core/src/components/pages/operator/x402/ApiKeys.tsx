@@ -13,14 +13,23 @@
  * a "store it now" warning. The secret is held only in component state (never
  * persisted) and is wiped when the panel is dismissed.
  *
- * Revoke flow: a two-step inline confirm (no window.confirm) — the row's Revoke
- * button flips to a "Confirm" / "Cancel" pair before the DELETE fires.
+ * Revoke / delete flow: a two-step inline confirm (no window.confirm). An ACTIVE
+ * key shows Revoke (soft); once revoked the row shows a "revoked" pill and a
+ * Delete button that hard-removes the row (?hard=true). Mirrors the billing
+ * dashboard (app.js: Revoke first, then Delete the revoked row).
+ *
+ * Install banner: on mint, alongside the one-time secret, an "install to .env &
+ * restart" action writes BILLING_CHAT_KEY to the LOCAL agent's .env (same-origin,
+ * not the remote gateway) and restarts it — so a headless agent picks the key up.
  */
 import { useCallback, useState } from "react";
 import {
   apiKeyRowToEntry,
+  deleteApiKey,
   fetchApiKeys,
+  installChatKey,
   mintApiKey,
+  restartAgent,
   revokeApiKey,
   useLive,
 } from "../client-billing";
@@ -50,9 +59,15 @@ export function ApiKeys() {
   const [minted, setMinted] = useState<MintedKey | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Row id awaiting revoke confirmation (inline two-step, no window.confirm).
+  // Install-to-.env + restart (only meaningful after a mint).
+  const [installPhase, setInstallPhase] = useState<
+    "idle" | "installing" | "restarting" | "done" | "error"
+  >("idle");
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  // Row id awaiting revoke/delete confirmation (inline two-step, no window.confirm).
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
 
   const onMint = useCallback(async () => {
     const trimmed = name.trim();
@@ -85,23 +100,43 @@ export function ApiKeys() {
     }
   }, [minted]);
 
-  // Dismiss wipes the secret from state — it is never stored anywhere else.
+  // Dismiss wipes the secret + install state — never stored anywhere else.
   const dismissReveal = useCallback(() => {
     setMinted(null);
     setCopied(false);
+    setInstallPhase("idle");
+    setInstallError(null);
   }, []);
 
-  const onRevoke = useCallback(
-    async (id?: string) => {
-      if (!id) return;
-      setRevokingId(id);
+  // Install the minted key into the LOCAL agent's .env, then restart it.
+  const onInstall = useCallback(async () => {
+    if (!minted) return;
+    setInstallError(null);
+    setInstallPhase("installing");
+    try {
+      await installChatKey(minted.key);
+      setInstallPhase("restarting");
+      await restartAgent();
+      setInstallPhase("done");
+    } catch (e) {
+      setInstallError(e instanceof Error ? e.message : "Install failed.");
+      setInstallPhase("error");
+    }
+  }, [minted]);
+
+  // Active key → soft revoke; already-revoked key → hard delete. Both two-step.
+  const onConfirmAction = useCallback(
+    async (row: KeyRow) => {
+      if (!row.id) return;
+      setActingId(row.id);
       try {
-        await revokeApiKey(id);
+        if (row.live) await revokeApiKey(row.id);
+        else await deleteApiKey(row.id);
         reload();
       } catch {
         /* ignore — keep current view */
       } finally {
-        setRevokingId(null);
+        setActingId(null);
         setConfirmId(null);
       }
     },
@@ -219,6 +254,62 @@ export function ApiKeys() {
               {copied ? "✓ Copied" : "Copy"}
             </button>
           </div>
+
+          {/* Install into the local agent's .env + restart so it uses the key. */}
+          <div
+            style={{
+              marginTop: 14,
+              borderTop: "1px solid var(--border-strong)",
+              paddingTop: 12,
+            }}
+          >
+            <div
+              style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}
+            >
+              To use this key for headless calls, set it as{" "}
+              <code className="mono" style={{ color: "var(--gold-hi)" }}>
+                BILLING_CHAT_KEY
+              </code>{" "}
+              in the agent&rsquo;s{" "}
+              <code className="mono" style={{ color: "var(--gold-hi)" }}>
+                .env
+              </code>{" "}
+              and restart it. This writes it to the local agent and restarts for
+              you:
+            </div>
+            {installPhase === "done" ? (
+              <span className="chip ok" style={{ display: "inline-flex" }}>
+                ✓ Saved to .env · agent restarting
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-gold btn-sm"
+                onClick={onInstall}
+                disabled={
+                  installPhase === "installing" || installPhase === "restarting"
+                }
+              >
+                {installPhase === "installing"
+                  ? "Writing .env…"
+                  : installPhase === "restarting"
+                    ? "Restarting agent…"
+                    : "Install to .env & restart agent"}
+              </button>
+            )}
+            {installError && (
+              <div
+                className="mono"
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: "var(--gold-hi)",
+                }}
+              >
+                {installError}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -250,7 +341,7 @@ export function ApiKeys() {
         )}
         {shownKeys.map((k) => {
           const pending = k.id != null && confirmId === k.id;
-          const isRevoking = k.id != null && revokingId === k.id;
+          const isActing = k.id != null && actingId === k.id;
           return (
             <div key={k.id ?? k.val} className="key-row">
               <div className="key-icon">
@@ -269,9 +360,13 @@ export function ApiKeys() {
               <div className="key-main">
                 <div className="key-name">
                   {k.name}{" "}
-                  {k.live && (
+                  {k.live ? (
                     <span className="chip ok" style={{ marginLeft: 6 }}>
                       active
+                    </span>
+                  ) : (
+                    <span className="chip mute" style={{ marginLeft: 6 }}>
+                      revoked
                     </span>
                   )}
                 </div>
@@ -283,16 +378,22 @@ export function ApiKeys() {
                   <button
                     type="button"
                     className="btn btn-gold btn-sm"
-                    onClick={() => onRevoke(k.id)}
-                    disabled={isRevoking}
+                    onClick={() => onConfirmAction(k)}
+                    disabled={isActing}
                   >
-                    {isRevoking ? "Revoking…" : "Confirm"}
+                    {isActing
+                      ? k.live
+                        ? "Revoking…"
+                        : "Deleting…"
+                      : k.live
+                        ? "Confirm revoke"
+                        : "Confirm delete"}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
                     onClick={() => setConfirmId(null)}
-                    disabled={isRevoking}
+                    disabled={isActing}
                   >
                     Cancel
                   </button>
@@ -305,12 +406,14 @@ export function ApiKeys() {
                   disabled={k.id == null}
                   title={
                     k.id == null
-                      ? "Sign in to the gateway to revoke real keys"
-                      : undefined
+                      ? "Sign in to the gateway to manage real keys"
+                      : k.live
+                        ? undefined
+                        : "Permanently remove this revoked key"
                   }
                   style={{ flexShrink: 0 }}
                 >
-                  Revoke
+                  {k.live ? "Revoke" : "Delete"}
                 </button>
               )}
             </div>

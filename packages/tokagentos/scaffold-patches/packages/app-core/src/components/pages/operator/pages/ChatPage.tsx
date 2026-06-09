@@ -333,12 +333,29 @@ export function ChatPage() {
                         ? "(no response)"
                         : "…";
                   return (
-                    <div className="msg-block" key={m.id}>
+                    <div
+                      className={`msg-block ${isUser ? "user" : ""}`}
+                      key={m.id}
+                    >
                       <div className={`msg-role ${isUser ? "" : "agent"}`}>
                         <span className="av">
                           {isUser ? "🧑" : <KeyMark size={14} />}
                         </span>{" "}
-                        {isUser ? "you" : "treasurer · vault mode"}
+                        {isUser ? (
+                          "you"
+                        ) : (
+                          <>
+                            treasurer · vault mode{" "}
+                            <span
+                              style={{
+                                color: "var(--gold-hi)",
+                                textTransform: "none",
+                              }}
+                            >
+                              ({modelLabel})
+                            </span>
+                          </>
+                        )}
                       </div>
                       <div className={`msg-text ${isUser ? "user" : ""}`}>
                         {body}

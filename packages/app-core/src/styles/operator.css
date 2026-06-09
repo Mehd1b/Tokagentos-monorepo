@@ -673,7 +673,19 @@
 }
 .op-root .msg-role.agent .av { background: rgba(240,185,11,0.12); border-color: rgba(240,185,11,0.3); }
 .op-root .msg-text { font-size: 15px; line-height: 1.6; color: var(--text); }
-.op-root .msg-text.user { color: var(--text-strong); }
+/* User turns align to the right as a chat bubble; agent turns stay left. */
+.op-root .msg-block.user { display: flex; flex-direction: column; align-items: flex-end; }
+.op-root .msg-block.user .msg-role { flex-direction: row-reverse; }
+.op-root .msg-text.user {
+  color: var(--text-strong);
+  background: rgba(240,185,11,0.08);
+  border: 1px solid rgba(240,185,11,0.20);
+  border-radius: 13px 13px 4px 13px;
+  padding: 10px 14px;
+  max-width: 78%;
+  text-align: left;
+  width: fit-content;
+}
 
 /* tool/action call card in chat */
 .op-root .action-card {

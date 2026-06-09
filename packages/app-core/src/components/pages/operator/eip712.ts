@@ -74,9 +74,29 @@ export function decomposeSignature(hex: string): {
 /**
  * UUID topupId → 32-byte hex nonce, matching the backend's encoding:
  * `0x${topupId.replace(/-/g, "").padStart(64, "0")}`.
+ *
+ * NOTE: do NOT use this as the EIP-3009 deposit nonce. The backend uses the
+ * authorization nonce as the on-chain replay guard (vault topupId == auth.nonce),
+ * so a deterministic topupId-derived nonce collides whenever the same quote
+ * topupId repeats (e.g. the swap stuck-flow re-credits the same amount) → the
+ * on-chain transferWithAuthorization reverts "authorization is used" and
+ * depositX402 fails. Use `randomNonce()` for deposits, exactly like app.js.
  */
 export function topupIdToNonce(topupId: string): `0x${string}` {
   return `0x${topupId.replace(/-/g, "").padStart(64, "0")}` as `0x${string}`;
+}
+
+/**
+ * A fresh, unique 32-byte EIP-3009 nonce (32 random bytes). Mirrors app.js
+ * `randomNonce()` — every deposit MUST use a new nonce because the on-chain
+ * transferWithAuthorization (and the vault's topupId guard) reject a reused one.
+ */
+export function randomNonce(): `0x${string}` {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  let hex = "0x";
+  for (const x of b) hex += x.toString(16).padStart(2, "0");
+  return hex as `0x${string}`;
 }
 
 const TRANSFER_WITH_AUTHORIZATION_TYPE = [

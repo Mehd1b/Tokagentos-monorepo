@@ -24,10 +24,10 @@ import {
   connectWallet,
   formatAttoPtonAmount,
   hasInjectedWallet,
+  randomNonce,
   SignatureRejectedError,
   signTransferWithAuthorization,
   switchWalletChain,
-  topupIdToNonce,
   walletChainId,
 } from "../eip712";
 
@@ -141,7 +141,9 @@ export function TopUpCard({
         domain: quote.domain,
         to: quote.vaultAddress,
         valueAttoPton: quote.amountPton,
-        nonceHex: topupIdToNonce(quote.topupId),
+        // Fresh random nonce (app.js parity) — the on-chain replay guard rejects
+        // a reused nonce, and a topupId-derived one repeats on re-quotes.
+        nonceHex: randomNonce(),
       });
       const outcome: SettleOutcome = await settleTopup(
         quote.topupId,

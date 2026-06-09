@@ -57,8 +57,8 @@ import {
 } from "./client-billing";
 import {
   type Eip712Domain,
+  randomNonce,
   signTransferWithAuthorization,
-  topupIdToNonce,
 } from "./eip712";
 import {
   type ChainAddMeta,
@@ -325,7 +325,9 @@ async function runX402Credit(
     domain: quote.domain as Eip712Domain,
     to: quote.vaultAddress,
     valueAttoPton: quote.amountPton,
-    nonceHex: topupIdToNonce(quote.topupId),
+    // Fresh random nonce (app.js parity) — a topupId-derived nonce collides on
+    // the on-chain replay guard when the same quote repeats (swap stuck-flow).
+    nonceHex: randomNonce(),
   });
   const outcome: SettleOutcome = await settleTopup(
     quote.topupId,

@@ -270,7 +270,9 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       '    // Default is "local sidecar allowed" — only disable if explicitly set to\n' +
       "    // false. Mobile forces this to false regardless of user setting.\n" +
       "    const localN8nEnabled =\n" +
-      "      params.isNativePlatform === true ? false : n8nConfig?.localEnabled !== false;\n",
+      "      params.isNativePlatform === true\n" +
+      "        ? false\n" +
+      "        : n8nConfig?.localEnabled !== false;\n",
     replaceWith:
       "    // [tokagent surgical-patch] @elizaos/plugin-n8n-workflow isn't\n" +
       "    // shipped in the Tokagent scaffold, so force-skip the auto-enable\n" +
@@ -278,7 +280,7 @@ export const UPSTREAM_SURGICAL_PATCHES: ReadonlyArray<{
       "    const localN8nEnabled = false;\n",
   },
   {
-    path: "packages/agent/src/runtime/tokagent.ts",
+    path: "packages/agent/src/runtime/eliza.ts",
     description:
       "Add a Tokagent capability hint to the system-prompt suffix. Upstream " +
       "appends an n8n hint when the local n8n sidecar is enabled, but " +

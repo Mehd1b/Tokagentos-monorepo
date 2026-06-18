@@ -1,13 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   FullstackTemplateValues,
   PluginTemplateValues,
-  ProjectTemplateMetadata,
   TemplateDefinition,
   TemplateUpstream,
 } from "./types.js";
@@ -1054,19 +1052,6 @@ export function renderTemplateTree(options: {
   return managedFiles;
 }
 
-export function createRenderedTempDir(options: {
-  replacements: Array<[string, string]>;
-  sourceDir: string;
-}): { dir: string; managedFiles: Record<string, string> } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tokagentos-template-"));
-  const managedFiles = renderTemplateTree({
-    destinationDir: dir,
-    replacements: options.replacements,
-    sourceDir: options.sourceDir,
-  });
-  return { dir, managedFiles };
-}
-
 export function resolveTemplateUpstream(
   upstream: TemplateUpstream,
 ): TemplateUpstream {
@@ -1498,123 +1483,6 @@ export function ensureUpstreamCompatibilityFiles(
   return created;
 }
 
-export function buildMetadata(options: {
-  cliVersion: string;
-  language?: string;
-  managedFiles: Record<string, string>;
-  template: TemplateDefinition;
-  values: Record<string, string>;
-}): ProjectTemplateMetadata {
-  const now = new Date().toISOString();
-  return {
-    cliVersion: options.cliVersion,
-    createdAt: now,
-    language: options.language,
-    managedFiles: options.managedFiles,
-    templateId: options.template.id,
-    templateVersion: options.template.version,
-    updatedAt: now,
-    values: options.values,
-  };
-}
-
-export function updateManagedFiles(options: {
-  currentMetadata: ProjectTemplateMetadata;
-  dryRun?: boolean;
-  projectRoot: string;
-  renderedDir: string;
-  renderedManagedFiles: Record<string, string>;
-}): {
-  conflicts: string[];
-  created: string[];
-  deleted: string[];
-  nextManagedFiles: Record<string, string>;
-  unchanged: string[];
-  updated: string[];
-} {
-  const conflicts: string[] = [];
-  const created: string[] = [];
-  const deleted: string[] = [];
-  const unchanged: string[] = [];
-  const updated: string[] = [];
-  const nextManagedFiles = { ...options.renderedManagedFiles };
-
-  const previousFiles = options.currentMetadata.managedFiles;
-  const allManagedPaths = new Set([
-    ...Object.keys(previousFiles),
-    ...Object.keys(options.renderedManagedFiles),
-  ]);
-
-  for (const relativePath of allManagedPaths) {
-    const projectPath = path.join(options.projectRoot, relativePath);
-    const renderedPath = path.join(options.renderedDir, relativePath);
-    const previousHash = previousFiles[relativePath];
-    const nextHash = options.renderedManagedFiles[relativePath];
-    const hasCurrentFile = fs.existsSync(projectPath);
-    const hasRenderedFile = fs.existsSync(renderedPath);
-    const currentHash = hasCurrentFile
-      ? sha256(fs.readFileSync(projectPath))
-      : "";
-
-    if (previousHash && !hasRenderedFile) {
-      if (currentHash && currentHash !== previousHash) {
-        conflicts.push(relativePath);
-        delete nextManagedFiles[relativePath];
-        continue;
-      }
-      deleted.push(relativePath);
-      delete nextManagedFiles[relativePath];
-      if (!options.dryRun && fs.existsSync(projectPath)) {
-        fs.rmSync(projectPath, { force: true });
-      }
-      continue;
-    }
-
-    if (!previousHash && nextHash) {
-      if (currentHash && currentHash !== nextHash) {
-        conflicts.push(relativePath);
-        continue;
-      }
-      created.push(relativePath);
-      if (!options.dryRun) {
-        fs.mkdirSync(path.dirname(projectPath), { recursive: true });
-        fs.copyFileSync(renderedPath, projectPath);
-      }
-      continue;
-    }
-
-    if (currentHash === previousHash) {
-      if (currentHash === nextHash) {
-        unchanged.push(relativePath);
-        continue;
-      }
-      updated.push(relativePath);
-      if (!options.dryRun) {
-        fs.mkdirSync(path.dirname(projectPath), { recursive: true });
-        fs.copyFileSync(renderedPath, projectPath);
-      }
-      continue;
-    }
-
-    if (currentHash === nextHash) {
-      unchanged.push(relativePath);
-      continue;
-    }
-
-    conflicts.push(relativePath);
-    delete nextManagedFiles[relativePath];
-  }
-
-  return {
-    conflicts,
-    created,
-    deleted,
-    nextManagedFiles,
-    unchanged,
-    updated,
-  };
-}
-
 export function hydrateGitSubmoduleWorkspace(options: {
   dryRun?: boolean;
   projectRoot: string;
@@ -1899,60 +1767,4 @@ export function initializeGitSubmodule(options: {
       stdio: "inherit",
     });
   }
-}
-
-export function updateGitSubmodule(options: {
-  branch?: string;
-  commit?: string;
-  dryRun?: boolean;
-  projectRoot: string;
-  repo: string;
-  submodulePath: string;
-}): void {
-  if (options.dryRun) {
-    return;
-  }
-
-  ensureGitRepository(options.projectRoot);
-  const submoduleRoot = path.join(options.projectRoot, options.submodulePath);
-  if (!fs.existsSync(submoduleRoot)) {
-    initializeGitSubmodule({
-      branch: options.branch,
-      commit: options.commit,
-      projectRoot: options.projectRoot,
-      repo: options.repo,
-      submodulePath: options.submodulePath,
-    });
-    return;
-  }
-
-  const localRepoRoot = resolveLocalRepoRoot(options.repo);
-  const commit = options.commit?.trim();
-  if (commit) {
-    // Pinned mode: ignore --remote (which follows branch HEAD) and
-    // force-checkout the pinned SHA so existing scaffolds stay locked
-    // to the same upstream state as fresh ones.
-    execFileSync("git", ["fetch", "--depth", "1", "origin", commit], {
-      cwd: submoduleRoot,
-      stdio: "inherit",
-    });
-    execFileSync("git", ["checkout", "--detach", commit], {
-      cwd: submoduleRoot,
-      stdio: "inherit",
-    });
-    return;
-  }
-
-  execFileSync(
-    "git",
-    withOptionalFileProtocol(options.repo, [
-      "submodule",
-      "update",
-      "--init",
-      "--remote",
-      ...(localRepoRoot ? ["--reference", localRepoRoot] : []),
-      options.submodulePath,
-    ]),
-    { cwd: options.projectRoot, stdio: "inherit" },
-  );
 }

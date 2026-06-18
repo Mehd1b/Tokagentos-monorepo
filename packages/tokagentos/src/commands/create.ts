@@ -5,10 +5,8 @@ import * as clack from "@clack/prompts";
 import pc from "picocolors";
 import { getTemplateById, getTemplates, getTemplatesDir } from "../manifest.js";
 import { getCliVersion } from "../package-info.js";
-import { writeProjectMetadata } from "../project-metadata.js";
 import {
   buildFullstackTemplateValues,
-  buildMetadata,
   buildPluginTemplateValues,
   getTemplateReplacementEntries,
   hydrateGitSubmoduleWorkspace,
@@ -142,18 +140,8 @@ function validateProjectDirectory(
   return undefined;
 }
 
-function getNextSteps(options: {
-  projectDir: string;
-  skipUpstream?: boolean;
-  templateId: string;
-}): string[] {
-  const steps = [`cd ${options.projectDir}`];
-  if (options.templateId === "fullstack-app" && options.skipUpstream) {
-    steps.push("npx tokagentos upgrade");
-  }
-  steps.push("bun install");
-  steps.push(options.templateId === "plugin" ? "bun run build" : "bun run dev");
-  return steps;
+function getNextSteps(projectDir: string): string[] {
+  return [`cd ${projectDir}`, "bun install", "bun run dev"];
 }
 
 async function promptTemplateId(initial?: string): Promise<string> {
@@ -653,13 +641,13 @@ export async function create(
   const spinner = clack.spinner();
   spinner.start("Creating project...");
 
-  const managedFiles = renderTemplateTree({
+  renderTemplateTree({
     destinationDir,
     replacements,
     sourceDir,
   });
 
-  if (template.upstream && !options.skipUpstream) {
+  if (template.upstream) {
     const upstream = resolveTemplateUpstream(template.upstream);
     spinner.message("Initializing upstream tokagent checkout...");
     initializeGitSubmodule({
@@ -674,17 +662,6 @@ export async function create(
       upstream,
     });
   }
-
-  writeProjectMetadata(
-    destinationDir,
-    buildMetadata({
-      cliVersion: getCliVersion(),
-      language,
-      managedFiles,
-      template,
-      values: values as Record<string, string>,
-    }),
-  );
 
   // Always materialize .env from .env.example so the scaffolded project boots
   // with the BILLING_MODE=client + TOKAGENT_GATEWAY_URL prefilled values
@@ -724,13 +701,6 @@ export async function create(
   spinner.stop("Project created successfully!");
 
   console.log();
-  clack.note(
-    getNextSteps({
-      projectDir: finalProjectName,
-      skipUpstream: options.skipUpstream,
-      templateId: template.id,
-    }).join("\n"),
-    "Next steps",
-  );
+  clack.note(getNextSteps(finalProjectName).join("\n"), "Next steps");
   clack.outro(`${pc.green("✨")} Your ${template.name} project is ready!`);
 }

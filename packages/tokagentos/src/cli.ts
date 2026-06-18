@@ -3,7 +3,7 @@
 import * as clack from "@clack/prompts";
 import { Command } from "commander";
 import { renderBanner } from "./banner.js";
-import { create, info, upgrade, version } from "./commands/index.js";
+import { create, info, version } from "./commands/index.js";
 import { applyHelpTheme } from "./help-formatter.js";
 import { getCliVersion } from "./package-info.js";
 import { c } from "./theme.js";
@@ -15,7 +15,6 @@ async function defaultAction(): Promise<void> {
 		message: "What do you want to do?",
 		options: [
 			{ value: "create", label: "Create a new project" },
-			{ value: "upgrade", label: "Upgrade the current project" },
 			{ value: "info", label: "Show available templates" },
 		],
 	});
@@ -27,10 +26,6 @@ async function defaultAction(): Promise<void> {
 
 	if (choice === "create") {
 		await create(undefined, {});
-		return;
-	}
-	if (choice === "upgrade") {
-		await upgrade({});
 		return;
 	}
 	info({});
@@ -68,7 +63,6 @@ applyHelpTheme(
 		.option("--description <description>", "Plugin description override")
 		.option("--github-username <username>", "Plugin GitHub username override")
 		.option("--repo-url <url>", "Plugin repository URL override")
-		.option("--skip-upstream", "Skip initializing the upstream tokagent checkout")
 		.option(
 			"--llm <provider>",
 			"LLM provider to pre-configure: openai | anthropic | google | groq | openrouter | litellm | xai | deepseek | ollama | skip",
@@ -90,16 +84,6 @@ applyHelpTheme(
 			"Model alias for TEXT_LARGE (LiteLLM only). Required with --llm litellm.",
 		)
 		.action(create),
-);
-
-applyHelpTheme(
-	program
-		.command("upgrade")
-		.description("Upgrade the current generated project to the latest template")
-		.option("--check", "Check what would change without writing files")
-		.option("--dry-run", "Preview the upgrade without writing files")
-		.option("--skip-upstream", "Skip updating the upstream tokagent checkout")
-		.action(upgrade),
 );
 
 program.action(defaultAction);

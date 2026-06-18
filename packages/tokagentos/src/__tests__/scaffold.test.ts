@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,15 +15,9 @@ import {
   removePackageJsonDependencies,
   removePackageJsonWorkspaces,
   renderTemplateTree,
-  updateManagedFiles,
 } from "../scaffold.js";
-import type { ProjectTemplateMetadata } from "../types.js";
 
 const tempDirs: string[] = [];
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
@@ -424,56 +417,4 @@ describe("managed file upgrades", () => {
     ).toBe(true);
   });
 
-  test("updates untouched managed files and reports conflicts", () => {
-    const projectRoot = fs.mkdtempSync(
-      path.join(os.tmpdir(), "tokagentos-upgrade-project-"),
-    );
-    const renderedDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "tokagentos-upgrade-render-"),
-    );
-    tempDirs.push(projectRoot, renderedDir);
-
-    fs.mkdirSync(path.join(projectRoot, "config"), { recursive: true });
-    fs.writeFileSync(path.join(projectRoot, "config", "safe.txt"), "old\n");
-    fs.writeFileSync(
-      path.join(projectRoot, "config", "conflict.txt"),
-      "local\n",
-    );
-
-    fs.mkdirSync(path.join(renderedDir, "config"), { recursive: true });
-    fs.writeFileSync(path.join(renderedDir, "config", "safe.txt"), "new\n");
-    fs.writeFileSync(
-      path.join(renderedDir, "config", "conflict.txt"),
-      "upstream\n",
-    );
-    fs.writeFileSync(path.join(renderedDir, "config", "added.txt"), "added\n");
-
-    const metadata: ProjectTemplateMetadata = {
-      cliVersion: "2.0.0-alpha.1",
-      createdAt: "2026-04-14T00:00:00.000Z",
-      managedFiles: {
-        "config/conflict.txt": sha256("old\n"),
-        "config/safe.txt": sha256("old\n"),
-      },
-      templateId: "fullstack-app",
-      templateVersion: 1,
-      updatedAt: "2026-04-14T00:00:00.000Z",
-      values: {},
-    };
-
-    const result = updateManagedFiles({
-      currentMetadata: metadata,
-      projectRoot,
-      renderedDir,
-      renderedManagedFiles: {
-        "config/added.txt": sha256("added\n"),
-        "config/conflict.txt": sha256("upstream\n"),
-        "config/safe.txt": sha256("new\n"),
-      },
-    });
-
-    expect(result.updated).toEqual(["config/safe.txt"]);
-    expect(result.created).toEqual(["config/added.txt"]);
-    expect(result.conflicts).toEqual(["config/conflict.txt"]);
-  });
 });

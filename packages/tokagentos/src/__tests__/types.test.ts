@@ -5,7 +5,6 @@ import type {
   PluginTemplateValues,
   TemplateDefinition,
   TemplatesManifest,
-  UpgradeOptions,
 } from "../types.js";
 
 describe("TemplateDefinition", () => {
@@ -93,13 +92,4 @@ describe("CLI option types", () => {
     expect(options.template).toBe("fullstack-app");
   });
 
-  test("upgrade options support dry runs", () => {
-    const options: UpgradeOptions = {
-      check: true,
-      dryRun: true,
-      skipUpstream: true,
-    };
-
-    expect(options.dryRun).toBe(true);
-  });
 });

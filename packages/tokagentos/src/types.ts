@@ -42,7 +42,6 @@ export interface CreateOptions {
   description?: string;
   githubUsername?: string;
   repoUrl?: string;
-  skipUpstream?: boolean;
   llm?: string;
   apiKey?: string;
   llmBaseUrl?: string;
@@ -54,12 +53,6 @@ export interface InfoOptions {
   template?: string;
   language?: string;
   json?: boolean;
-}
-
-export interface UpgradeOptions {
-  check?: boolean;
-  dryRun?: boolean;
-  skipUpstream?: boolean;
 }
 
 export interface PluginTemplateValues extends Record<string, string> {
@@ -85,15 +78,4 @@ export interface FullstackTemplateValues extends Record<string, string> {
   projectSlug: string;
   releaseBaseUrl: string;
   repoName: string;
-}
-
-export interface ProjectTemplateMetadata {
-  cliVersion: string;
-  createdAt: string;
-  language?: string;
-  managedFiles: Record<string, string>;
-  templateId: TemplateId;
-  templateVersion: number;
-  updatedAt: string;
-  values: Record<string, string>;
 }

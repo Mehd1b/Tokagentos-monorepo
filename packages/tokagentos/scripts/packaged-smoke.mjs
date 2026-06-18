@@ -26,12 +26,6 @@ const useLocalUpstream =
   fs.existsSync(
     path.join(localUpstreamRepo, "packages", "app-core", "package.json"),
   );
-const fullstackInstallEnv = {
-  ...process.env,
-  MILADY_NO_VISION_DEPS: process.env.MILADY_NO_VISION_DEPS || "1",
-  SKIP_AVATAR_CLONE: process.env.SKIP_AVATAR_CLONE || "1",
-};
-
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
     cwd: options.cwd,
@@ -123,6 +117,12 @@ async function main() {
       }
     }
 
+    const fullstackInstallEnv = {
+      ...process.env,
+      MILADY_NO_VISION_DEPS: process.env.MILADY_NO_VISION_DEPS || "1",
+      SKIP_AVATAR_CLONE: process.env.SKIP_AVATAR_CLONE || "1",
+    };
+
     const workspaceDir = path.join(smokeDir, "workspace");
     fs.mkdirSync(workspaceDir, { recursive: true });
 
@@ -140,9 +140,9 @@ async function main() {
     assertPathExists(path.join(projectDir, "apps", "app", "package.json"));
     assertPathExists(path.join(projectDir, "tokagent"));
     assertPathExists(path.join(projectDir, ".env"));
-    const env = fs.readFileSync(path.join(projectDir, ".env"), "utf8");
-    if (!/^ANTHROPIC_API_KEY=sk-ant-smoke$/m.test(env)) {
-      throw new Error(`.env missing ANTHROPIC_API_KEY line:\n${env}`);
+    const dotEnvContent = fs.readFileSync(path.join(projectDir, ".env"), "utf8");
+    if (!/^ANTHROPIC_API_KEY=sk-ant-smoke$/m.test(dotEnvContent)) {
+      throw new Error(`.env missing ANTHROPIC_API_KEY line:\n${dotEnvContent}`);
     }
     if (envVarWritten !== "ANTHROPIC_API_KEY") {
       throw new Error(`unexpected envVarWritten: ${envVarWritten}`);

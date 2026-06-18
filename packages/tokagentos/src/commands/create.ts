@@ -323,6 +323,10 @@ export function scaffoldProject(
   const finalName = normalizeProjectName(input.projectName);
   const destinationDir = path.resolve(input.cwd, finalName);
 
+  if (fs.existsSync(destinationDir)) {
+    throw new Error(`Directory '${destinationDir}' already exists`);
+  }
+
   const values = buildFullstackTemplateValues(finalName);
   const sourceDir = resolveTemplateSourceDir({
     language,

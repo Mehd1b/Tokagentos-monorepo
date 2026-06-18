@@ -27,7 +27,7 @@ bun run dev
 
 `bun run dev` launches the UI, the API server, and the headless agent runtime.
 
-## Other flags
+## Help & version
 
 ```bash
 tokagentos --help      # usage

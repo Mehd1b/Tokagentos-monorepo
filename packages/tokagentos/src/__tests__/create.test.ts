@@ -82,6 +82,20 @@ describe("scaffoldProject — env writing", () => {
     });
   });
 
+  it("throws if the target directory already exists", () => {
+    return withTempCwd((dir) => {
+      fs.mkdirSync(path.join(dir, "dupe-app"));
+      expect(() =>
+        scaffoldProject({
+          cwd: dir,
+          projectName: "dupe-app",
+          providerId: "anthropic",
+          apiKey: "sk-ant-dupe",
+        }),
+      ).toThrow(/already exists/);
+    });
+  });
+
   it("writes LITELLM_* lines when litellm extras are supplied", () => {
     return withTempCwd((dir) => {
       scaffoldProject({

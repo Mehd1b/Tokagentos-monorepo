@@ -1,4 +1,4 @@
-export type TemplateId = "plugin" | "fullstack-app";
+export type TemplateId = "fullstack-app";
 
 export interface TemplateUpstream {
   path: string;
@@ -39,9 +39,6 @@ export interface CreateOptions {
   template?: string;
   language?: string;
   yes?: boolean;
-  description?: string;
-  githubUsername?: string;
-  repoUrl?: string;
   llm?: string;
   apiKey?: string;
   llmBaseUrl?: string;
@@ -53,16 +50,6 @@ export interface InfoOptions {
   template?: string;
   language?: string;
   json?: boolean;
-}
-
-export interface PluginTemplateValues extends Record<string, string> {
-  displayName: string;
-  tokagentVersion: string;
-  githubUsername: string;
-  pluginBaseName: string;
-  pluginDescription: string;
-  pluginSnake: string;
-  repoUrl: string;
 }
 
 export interface FullstackTemplateValues extends Record<string, string> {

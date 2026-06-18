@@ -4,11 +4,9 @@ import * as path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   buildFullstackTemplateValues,
-  buildPluginTemplateValues,
   ensurePackageJsonWorkspaces,
   ensureUpstreamCompatibilityFiles,
   getFullstackReplacementEntries,
-  getPluginReplacementEntries,
   applyUpstreamSurgicalPatches,
   pruneUpstreamPackageDependencies,
   pruneUpstreamUnusedPaths,
@@ -26,24 +24,6 @@ afterEach(() => {
 });
 
 describe("template value builders", () => {
-  test("builds plugin naming defaults", () => {
-    const values = buildPluginTemplateValues({
-      tokagentVersion: "2.0.0-alpha.139",
-      githubUsername: "octocat",
-      pluginDescription: "Plugin Foo",
-      projectName: "foo",
-      repoUrl: "https://github.com/octocat/plugin-foo",
-    });
-
-    expect(values.pluginBaseName).toBe("plugin-foo");
-    expect(values.pluginSnake).toBe("plugin_foo");
-    expect(
-      getPluginReplacementEntries(values).some(
-        ([from, to]) => from === "plugin-starter" && to === "plugin-foo",
-      ),
-    ).toBe(true);
-  });
-
   test("builds fullstack branding defaults", () => {
     const values = buildFullstackTemplateValues("cool app");
     expect(values.projectSlug).toBe("cool-app");
@@ -76,21 +56,15 @@ describe("managed file upgrades", () => {
 
     fs.mkdirSync(path.join(sourceDir, "src", "e2e"), { recursive: true });
     fs.writeFileSync(
-      path.join(sourceDir, "src", "e2e", "plugin-starter.e2e.ts"),
-      'export const value = "plugin-starter";\n',
+      path.join(sourceDir, "src", "e2e", "__PROJECT_SLUG__.e2e.ts"),
+      'export const value = "__PROJECT_SLUG__";\n',
     );
 
-    const values = buildPluginTemplateValues({
-      tokagentVersion: "2.0.0-alpha.139",
-      githubUsername: "octocat",
-      pluginDescription: "Plugin Foo",
-      projectName: "plugin-foo",
-      repoUrl: "https://github.com/octocat/plugin-foo",
-    });
+    const values = buildFullstackTemplateValues("cool app");
 
     const managedFiles = renderTemplateTree({
       destinationDir,
-      replacements: getPluginReplacementEntries(values),
+      replacements: getFullstackReplacementEntries(values),
       sourceDir,
     });
 
@@ -98,11 +72,11 @@ describe("managed file upgrades", () => {
       destinationDir,
       "src",
       "e2e",
-      "plugin-foo.e2e.ts",
+      "cool-app.e2e.ts",
     );
     expect(fs.existsSync(renderedPath)).toBe(true);
-    expect(fs.readFileSync(renderedPath, "utf8")).toContain("plugin-foo");
-    expect(managedFiles).toHaveProperty("src/e2e/plugin-foo.e2e.ts");
+    expect(fs.readFileSync(renderedPath, "utf8")).toContain("cool-app");
+    expect(managedFiles).toHaveProperty("src/e2e/cool-app.e2e.ts");
   });
 
   test("adds missing workspace entries without duplicating existing ones", () => {

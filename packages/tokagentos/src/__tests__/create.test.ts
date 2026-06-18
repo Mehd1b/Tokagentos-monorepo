@@ -25,13 +25,11 @@ vi.mock("@clack/prompts", () => ({
 
 vi.mock("../scaffold.js", () => ({
   buildFullstackTemplateValues: (name: string) => ({ projectSlug: name }),
-  buildPluginTemplateValues: () => ({}),
   buildMetadata: () => ({}),
-  getTemplateReplacementEntries: () => [],
+  getFullstackReplacementEntries: () => [],
   hydrateGitSubmoduleWorkspace: vi.fn(),
   initializeGitSubmodule: vi.fn(),
   renderTemplateTree: ({ destinationDir }: { destinationDir: string }) => {
-    // Create the destination directory so downstream .env writes can succeed.
     fs.mkdirSync(destinationDir, { recursive: true });
     return {};
   },

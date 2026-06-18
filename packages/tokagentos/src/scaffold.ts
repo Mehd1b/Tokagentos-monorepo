@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   FullstackTemplateValues,
-  PluginTemplateValues,
   TemplateDefinition,
   TemplateUpstream,
 } from "./types.js";
@@ -871,26 +870,6 @@ export function toDisplayName(value: string): string {
     .join(" ");
 }
 
-export function buildPluginTemplateValues(input: {
-  tokagentVersion: string;
-  githubUsername: string;
-  pluginDescription: string;
-  projectName: string;
-  repoUrl: string;
-}): PluginTemplateValues {
-  const slug = normalizeKebabCase(input.projectName);
-  const pluginBaseName = slug.startsWith("plugin-") ? slug : `plugin-${slug}`;
-  return {
-    displayName: toDisplayName(pluginBaseName.replace(/^plugin-/, "")),
-    tokagentVersion: input.tokagentVersion,
-    githubUsername: input.githubUsername,
-    pluginBaseName,
-    pluginDescription: input.pluginDescription,
-    pluginSnake: pluginBaseName.replace(/-/g, "_"),
-    repoUrl: input.repoUrl,
-  };
-}
-
 export function buildFullstackTemplateValues(
   projectName: string,
 ): FullstackTemplateValues {
@@ -914,37 +893,6 @@ export function buildFullstackTemplateValues(
   };
 }
 
-export function getPluginReplacementEntries(
-  values: PluginTemplateValues,
-): Array<[string, string]> {
-  const rustPluginName = `rust-${values.pluginBaseName}`;
-  const pythonPluginName = `python-${values.pluginBaseName}`;
-  const pythonSnake = `python_${values.pluginSnake}`;
-  return [
-    [`\${PLUGINNAME}`, values.pluginBaseName],
-    [`\${PLUGINDESCRIPTION}`, values.pluginDescription],
-    [`\${GITHUB_USERNAME}`, values.githubUsername],
-    [`\${REPO_URL}`, values.repoUrl],
-    ["__TOKAGENTOS_VERSION__", values.tokagentVersion],
-    ["@tokagentos/rust-plugin-starter", `@tokagentos/${rustPluginName}`],
-    ["@elizaos/plugin-starter", `@tokagentos/${values.pluginBaseName}`],
-    ["tokagentos_plugin_starter", `tokagentos_${values.pluginSnake}`],
-    ["tokagentos-plugin-starter", `tokagentos-${values.pluginBaseName}`],
-    ["rust_plugin_starter", `rust_${values.pluginSnake}`],
-    ["python_plugin_starter", pythonSnake],
-    ["rust-plugin-starter", rustPluginName],
-    ["python-plugin-starter", pythonPluginName],
-    ["plugin_starter", values.pluginSnake],
-    ["plugin-starter", values.pluginBaseName],
-    ["Plugin starter", `${values.displayName} plugin`],
-    ["plugin starter", `${values.displayName.toLowerCase()} plugin`],
-    [
-      "plugin starter template",
-      `${values.displayName.toLowerCase()} plugin template`,
-    ],
-  ];
-}
-
 export function getFullstackReplacementEntries(
   values: FullstackTemplateValues,
 ): Array<[string, string]> {
@@ -966,30 +914,12 @@ export function getFullstackReplacementEntries(
   ];
 }
 
-export function getTemplateReplacementEntries(options: {
-  templateId: TemplateDefinition["id"];
-  values: Record<string, string>;
-}): Array<[string, string]> {
-  if (options.templateId === "plugin") {
-    return getPluginReplacementEntries(
-      options.values as unknown as PluginTemplateValues,
-    );
-  }
-  return getFullstackReplacementEntries(
-    options.values as unknown as FullstackTemplateValues,
-  );
-}
-
 export function resolveTemplateSourceDir(options: {
   language?: string;
   template: TemplateDefinition;
   templatesDir: string;
 }): string {
-  const templateRoot = path.join(options.templatesDir, options.template.id);
-  if (options.template.id !== "plugin") {
-    return templateRoot;
-  }
-  return path.join(templateRoot, options.language ?? "typescript");
+  return path.join(options.templatesDir, options.template.id);
 }
 
 function copyRenderedTreeInternal(

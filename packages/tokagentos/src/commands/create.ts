@@ -4,22 +4,16 @@ import * as path from "node:path";
 import * as clack from "@clack/prompts";
 import pc from "picocolors";
 import { getTemplateById, getTemplates, getTemplatesDir } from "../manifest.js";
-import { getCliVersion } from "../package-info.js";
 import {
   buildFullstackTemplateValues,
-  buildPluginTemplateValues,
-  getTemplateReplacementEntries,
+  getFullstackReplacementEntries,
   hydrateGitSubmoduleWorkspace,
   initializeGitSubmodule,
   renderTemplateTree,
   resolveTemplateSourceDir,
   resolveTemplateUpstream,
 } from "../scaffold.js";
-import type {
-  CreateOptions,
-  FullstackTemplateValues,
-  PluginTemplateValues,
-} from "../types.js";
+import type { CreateOptions } from "../types.js";
 
 const LANGUAGE_NAMES: Record<string, string> = {
   python: "Python",
@@ -29,7 +23,6 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 const TEMPLATE_ICONS: Record<string, string> = {
   "fullstack-app": "🧱",
-  plugin: "🔌",
 };
 
 /**
@@ -511,47 +504,6 @@ function writeLlmExtraEnv(
   fs.writeFileSync(envPath, content);
 }
 
-async function promptPluginValues(
-  projectName: string,
-  options: CreateOptions,
-): Promise<PluginTemplateValues> {
-  const normalized = normalizeProjectName(projectName);
-  const defaultRepoName = normalized.startsWith("plugin-")
-    ? normalized
-    : `plugin-${normalized}`;
-  const githubUsername = options.githubUsername?.trim()
-    ? options.githubUsername.trim()
-    : options.yes
-      ? "your-github-username"
-      : (unwrapPromptResult(
-          await clack.text({
-            defaultValue: "your-github-username",
-            message: "GitHub username:",
-          }),
-        ) as string);
-  const pluginDescription = options.description?.trim()
-    ? options.description.trim()
-    : options.yes
-      ? `${defaultRepoName} plugin for tokagentOS`
-      : (unwrapPromptResult(
-          await clack.text({
-            defaultValue: `${defaultRepoName} plugin for tokagentOS`,
-            message: "Plugin description:",
-          }),
-        ) as string);
-  const repoUrl =
-    options.repoUrl?.trim() ||
-    `https://github.com/${githubUsername}/${defaultRepoName}`;
-
-  return buildPluginTemplateValues({
-    tokagentVersion: getCliVersion(),
-    githubUsername,
-    pluginDescription,
-    projectName: defaultRepoName,
-    repoUrl,
-  });
-}
-
 export async function create(
   projectName: string | undefined,
   options: CreateOptions,
@@ -573,20 +525,14 @@ export async function create(
     process.exit(1);
   }
 
-  let finalProjectName = await promptProjectName(template.id, projectName);
-  if (template.id === "plugin" && !finalProjectName.startsWith("plugin-")) {
-    finalProjectName = `plugin-${finalProjectName}`;
-  }
+  const finalProjectName = await promptProjectName(template.id, projectName);
 
   if (fs.existsSync(finalProjectName)) {
     clack.cancel(`Directory '${finalProjectName}' already exists.`);
     process.exit(1);
   }
 
-  const values: PluginTemplateValues | FullstackTemplateValues =
-    template.id === "plugin"
-      ? await promptPluginValues(finalProjectName, options)
-      : buildFullstackTemplateValues(finalProjectName);
+  const values = buildFullstackTemplateValues(finalProjectName);
 
   // LLM provider + API key — only meaningful for templates that run an
   // agent; plugin scaffolds don't need them. For fullstack-app we require
@@ -633,10 +579,7 @@ export async function create(
     template,
     templatesDir: getTemplatesDir(),
   });
-  const replacements = getTemplateReplacementEntries({
-    templateId: template.id,
-    values: values as Record<string, string>,
-  });
+  const replacements = getFullstackReplacementEntries(values);
 
   const spinner = clack.spinner();
   spinner.start("Creating project...");

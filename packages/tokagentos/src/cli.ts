@@ -60,9 +60,6 @@ applyHelpTheme(
 		.option("-t, --template <template>", "Template to create")
 		.option("-l, --language <lang>", "Template language")
 		.option("-y, --yes", "Skip confirmation prompts")
-		.option("--description <description>", "Plugin description override")
-		.option("--github-username <username>", "Plugin GitHub username override")
-		.option("--repo-url <url>", "Plugin repository URL override")
 		.option(
 			"--llm <provider>",
 			"LLM provider to pre-configure: openai | anthropic | google | groq | openrouter | litellm | xai | deepseek | ollama | skip",

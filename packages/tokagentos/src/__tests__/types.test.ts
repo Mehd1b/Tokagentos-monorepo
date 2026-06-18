@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import type {
-  CreateOptions,
   FullstackTemplateValues,
   TemplateDefinition,
   TemplatesManifest,
@@ -64,17 +63,4 @@ describe("Template value types", () => {
 
     expect(values.bundleId).toContain("fooapp");
   });
-});
-
-describe("CLI option types", () => {
-  test("create options support template selection", () => {
-    const options: CreateOptions = {
-      language: "typescript",
-      template: "fullstack-app",
-      yes: true,
-    };
-
-    expect(options.template).toBe("fullstack-app");
-  });
-
 });

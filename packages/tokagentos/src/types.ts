@@ -35,23 +35,6 @@ export interface TemplatesManifest {
   templates: TemplateDefinition[];
 }
 
-export interface CreateOptions {
-  template?: string;
-  language?: string;
-  yes?: boolean;
-  llm?: string;
-  apiKey?: string;
-  llmBaseUrl?: string;
-  llmSmallModel?: string;
-  llmLargeModel?: string;
-}
-
-export interface InfoOptions {
-  template?: string;
-  language?: string;
-  json?: boolean;
-}
-
 export interface FullstackTemplateValues extends Record<string, string> {
   appName: string;
   appUrl: string;

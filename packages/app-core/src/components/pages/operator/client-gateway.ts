@@ -325,6 +325,17 @@ export function fetchWalletAddresses(): Promise<GwWalletAddresses> {
   return getJson("/api/wallet/addresses");
 }
 
+/** Trust-boundary fields from GET /api/wallet/config (WalletConfigStatus).
+ *  Self-contained — no app-core imports. */
+export interface GwWalletConfig {
+  tradePermissionMode?: "user-sign-only" | "manual-local-key" | "agent-auto";
+  automationMode?: "full" | "connectors-only";
+  walletSource?: "local" | "managed" | "none";
+}
+export function fetchWalletConfig(): Promise<GwWalletConfig> {
+  return getJson("/api/wallet/config");
+}
+
 /** Minimal chainId → display meta, self-contained (no app-core chainConfig). */
 const CHAIN_META: Record<number, { key: string; name: string }> = {
   1: { key: "ethereum", name: "Ethereum" },

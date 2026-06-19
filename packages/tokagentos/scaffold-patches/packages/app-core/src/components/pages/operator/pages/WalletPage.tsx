@@ -1,36 +1,39 @@
 /**
- * Operator Wallet page — trust-boundary mode picker + per-chain balances.
+ * Operator Wallet page — trust-boundary mode display + per-chain balances.
  * Ported from handoff_app/prototype/components/Pages.jsx (WalletPage).
  *
- * Live: per-chain balances, total USD, chain count and the header address chip
- * come from the agent's same-origin wallet routes (GET /api/wallet/balances,
- * GET /api/wallet/addresses) via the operator `useLive` seam, falling back to
- * mock data when the routes are unavailable / unauthenticated / RPC unconfigured
- * (the routes return `{ evm: null, solana: null }`). Deliberately does NOT touch
- * TokagentClient / client.ts — all live data flows through the self-contained
- * `client-gateway` helpers (bare same-origin `fetch`, no app-core imports), so
- * the page ships identically into the monorepo dev surface and the published
- * scaffold.
+ * Live data flows:
+ *   - GET /api/wallet/balances  → per-chain balances, total USD, chain count
+ *   - GET /api/wallet/addresses → header address chip
+ *   - GET /api/wallet/config    → tradePermissionMode (read-only; reflects the
+ *                                  real backend config, no local setter)
  *
- * Not live (no honest backend): the trust-boundary mode picker (WALLET_MODES)
- * is local UI state, and the per-row "Send" button has no one-click backend
- * (the only real transfer path is steward/BSC-gated) — both stay presentational.
+ * All routes are served same-origin and fetched via the self-contained
+ * `client-gateway` helpers (bare fetch, no app-core imports), so the page
+ * ships identically into the monorepo dev surface and the published scaffold.
+ *
+ * tradePermissionMode → WALLET_MODES key mapping:
+ *   "user-sign-only"  → "vault"
+ *   "manual-local-key" → "direct"
+ *   "agent-auto"      → "both"
+ *   missing/undefined → no card marked active
+ *
+ * Not live (no backend setter): the per-row "Send" button stays disabled
+ * (the only real transfer path is steward/BSC-gated — backend coming).
  */
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useLive } from "../client-billing";
 import {
   chainMeta,
   fetchWalletAddresses,
   fetchWalletBalances,
+  fetchWalletConfig,
   type GwEvmChain,
   type GwWalletBalances,
 } from "../client-gateway";
 import {
-  CHAIN_BALANCES,
   type ChainBalance,
-  OPERATOR_ADDRESS_SHORT,
   WALLET_MODES,
-  WALLET_TOTAL_USD,
   type WalletMode,
   type WalletModeInfo,
 } from "../mock";
@@ -141,17 +144,33 @@ function shortenAddress(addr: string | null): string | null {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+/**
+ * Map tradePermissionMode → the WALLET_MODES key for the active card.
+ *   "user-sign-only"   → "vault"
+ *   "manual-local-key" → "direct"
+ *   "agent-auto"       → "both"
+ *   missing/undefined  → null (no card marked active)
+ */
+function modeFromConfig(
+  tradePermissionMode: string | undefined,
+): WalletMode | null {
+  switch (tradePermissionMode) {
+    case "user-sign-only":
+      return "vault";
+    case "manual-local-key":
+      return "direct";
+    case "agent-auto":
+      return "both";
+    default:
+      return null;
+  }
+}
+
 export function WalletPage({
   modes = WALLET_MODES,
-  chains: chainsProp = CHAIN_BALANCES,
-  total: totalProp = WALLET_TOTAL_USD,
 }: {
   modes?: Record<WalletMode, WalletModeInfo>;
-  chains?: ChainBalance[];
-  total?: string;
 } = {}) {
-  const [mode, setMode] = useState<WalletMode>("vault");
-
   // Live per-chain balances + total + chain count (GET /api/wallet/balances).
   const balancesFetcher = useCallback(() => fetchWalletBalances(), []);
   const { data: balData } = useLive(balancesFetcher);
@@ -162,15 +181,20 @@ export function WalletPage({
       ? walletBalancesToRows(balData)
       : null;
   const isLive = liveRows !== null;
-  const chains = liveRows ? liveRows.chains : chainsProp;
-  const total = liveRows ? liveRows.total : totalProp;
-  const chainCount = liveRows ? liveRows.count : chainsProp.length;
+  const chains = liveRows ? liveRows.chains : [];
+  const total = liveRows ? liveRows.total : "$0.00";
+  const chainCount = liveRows ? liveRows.count : 0;
 
   // Live operator address (GET /api/wallet/addresses) for the header chip.
   const addressFetcher = useCallback(() => fetchWalletAddresses(), []);
   const { data: addrData } = useLive(addressFetcher);
-  const operatorAddress =
-    shortenAddress(addrData?.evmAddress ?? null) ?? OPERATOR_ADDRESS_SHORT;
+  const operatorAddress = shortenAddress(addrData?.evmAddress ?? null) ?? "—";
+
+  // Live trust-boundary config (GET /api/wallet/config) — read-only display.
+  const configFetcher = useCallback(() => fetchWalletConfig(), []);
+  const { data: configData } = useLive(configFetcher);
+  const activeMode = modeFromConfig(configData?.tradePermissionMode);
+
   return (
     <div className="page">
       <div className="page-pad">
@@ -191,12 +215,9 @@ export function WalletPage({
         <div className="wallet-modes">
           {(Object.entries(modes) as [WalletMode, WalletModeInfo][]).map(
             ([k, v]) => (
-              // biome-ignore lint/a11y/noStaticElementInteractions: prototype uses a clickable card div (.wmode) — markup ported verbatim for pixel fidelity
-              // biome-ignore lint/a11y/useKeyWithClickEvents: prototype uses a clickable card div (.wmode) — markup ported verbatim for pixel fidelity
               <div
                 key={k}
-                className={`wmode ${mode === k ? "is-active" : ""}`}
-                onClick={() => setMode(k)}
+                className={`wmode ${activeMode === k ? "is-active" : ""}`}
               >
                 <div className="wmode-top">
                   <span className="wmode-name">{v.name}</span>
@@ -227,11 +248,7 @@ export function WalletPage({
               }}
             >
               Balances · {chainCount} chain{chainCount === 1 ? "" : "s"}
-              {isLive ? (
-                <span className="chip ok">live</span>
-              ) : (
-                <span className="chip mute">⟩ example values</span>
-              )}
+              {isLive && <span className="chip ok">live</span>}
             </div>
             <div
               className="mono"
@@ -241,34 +258,41 @@ export function WalletPage({
             </div>
           </div>
           <div className="chain-grid">
-            {chains.map((c) => (
-              <div key={c.name} className="chain-row">
-                <div className="chain-id">
-                  <span
-                    className="chain-dot"
-                    style={{
-                      background: c.color,
-                      boxShadow: `0 0 8px ${c.color}`,
-                    }}
-                  />
-                  <span className="chain-name">{c.name}</span>
-                  <span className="chain-short">{c.short}</span>
+            {isLive ? (
+              chains.map((c) => (
+                <div key={c.name} className="chain-row">
+                  <div className="chain-id">
+                    <span
+                      className="chain-dot"
+                      style={{
+                        background: c.color,
+                        boxShadow: `0 0 8px ${c.color}`,
+                      }}
+                    />
+                    <span className="chain-name">{c.name}</span>
+                    <span className="chain-short">{c.short}</span>
+                  </div>
+                  <span className="chain-amt">
+                    {c.amt}
+                    <em>{c.sym}</em>
+                  </span>
+                  <span className="chain-usd">{c.usd}</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled
+                    title="Send · preview — routed through the steward/vault flow (backend coming)"
+                  >
+                    Send
+                  </button>
                 </div>
-                <span className="chain-amt">
-                  {c.amt}
-                  <em>{c.sym}</em>
-                </span>
-                <span className="chain-usd">{c.usd}</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled
-                  title="Send · preview — routed through the steward/vault flow (backend coming)"
-                >
-                  Send
-                </button>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="mute" style={{ fontSize: 13, margin: "8px 0 4px" }}>
+                No on-chain balances — the wallet API returned no chains (RPC
+                unconfigured or not signed in).
+              </p>
+            )}
           </div>
         </div>
       </div>

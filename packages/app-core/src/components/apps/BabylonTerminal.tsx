@@ -551,11 +551,6 @@ function WalletPanel({
             </div>
           ) : null}
           {evmChains.map((chain) => {
-            const readyKey =
-              `${chain.chain.toLowerCase()}BalanceReady` as keyof WalletConfigStatus;
-            const ready = config
-              ? (config[readyKey] as boolean | undefined)
-              : undefined;
             const chainLabel =
               chain.chain.charAt(0).toUpperCase() + chain.chain.slice(1);
             const nativeUsd = formatCurrency(
@@ -567,8 +562,13 @@ function WalletPanel({
                 className="flex items-center gap-2 rounded px-2 py-1 text-xs text-txt"
               >
                 <span className="w-20 truncate font-medium">{chainLabel}</span>
-                {ready === false ? (
-                  <span className="text-2xs italic text-muted">Needs RPC</span>
+                {chain.error ? (
+                  <span
+                    className="text-2xs italic text-muted"
+                    title={chain.error}
+                  >
+                    Unavailable
+                  </span>
                 ) : (
                   <>
                     <span className="font-mono">
